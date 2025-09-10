@@ -4,6 +4,7 @@ def main_menu():
     """Главное меню бота"""
     keyboard = [
         [InlineKeyboardButton("❓ Задать вопрос", callback_data='ask')],
+        [InlineKeyboardButton("📄 Проверить документ", callback_data='check_document')],
         [InlineKeyboardButton("📚 Посмотреть законы", callback_data='laws')],
         [InlineKeyboardButton("ℹ️ О боте", callback_data='about')],
         [InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')]

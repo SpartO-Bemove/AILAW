@@ -5,6 +5,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
 
 from telegram import Update
+from telegram import Document
 from telegram.ext import ContextTypes
 
 from .keyboards import main_menu, laws_menu, back_to_main_button
@@ -14,6 +15,10 @@ try:
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from langchain_community.vectorstores import Chroma
     import os
+    import fitz  # PyMuPDF для работы с PDF
+    import docx  # python-docx для работы с Word
+    import tempfile
+    import asyncio
     from dotenv import load_dotenv
     
     load_dotenv()
@@ -36,6 +41,62 @@ except ImportError as e:
 
 # Словарь для отслеживания состояния пользователей
 user_states = {}
+
+def extract_text_from_file(file_path, file_extension):
+    """Извлекает текст из различных типов файлов"""
+    try:
+        if file_extension.lower() == '.pdf':
+            doc = fitz.open(file_path)
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            return text
+        
+        elif file_extension.lower() in ['.docx', '.doc']:
+            doc = docx.Document(file_path)
+            text = ""
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            return text
+        
+        elif file_extension.lower() == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        
+        else:
+            return None
+    except Exception as e:
+        print(f"Ошибка при извлечении текста: {e}")
+        return None
+
+async def analyze_document(document_text, user_id):
+    """Анализирует документ на соответствие законодательству"""
+    if law_assistant is None:
+        return "❌ Сервис анализа документов временно недоступен."
+    
+    analysis_prompt = f"""
+Проанализируй следующий документ на соответствие российскому законодательству:
+
+ДОКУМЕНТ:
+{document_text[:4000]}  # Ограничиваем размер для анализа
+
+Проведи анализ по следующим критериям:
+1. Соответствие формальным требованиям
+2. Наличие обязательных реквизитов
+3. Соответствие действующему законодательству
+4. Выявленные нарушения или несоответствия
+5. Рекомендации по исправлению
+
+Дай краткое заключение о юридической корректности документа.
+"""
+    
+    try:
+        answer, _ = law_assistant.conversational(analysis_prompt, user_id)
+        return answer
+    except Exception as e:
+        print(f"Ошибка при анализе документа: {e}")
+        return "❌ Произошла ошибка при анализе документа. Попробуйте позже."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -61,24 +122,132 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(welcome_text, reply_markup=main_menu())
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик загруженных документов"""
+    user_id = str(update.effective_user.id)
+    
+    # Проверяем состояние пользователя
+    if user_states.get(user_id) != 'checking_document':
+        await update.message.reply_text(
+            "Пожалуйста, сначала нажмите кнопку '📄 Проверить документ' в главном меню.",
+            reply_markup=main_menu()
+        )
+        return
+    
+    document = update.message.document
+    
+    # Проверяем размер файла (максимум 20 МБ)
+    if document.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text(
+            "❌ Файл слишком большой. Максимальный размер: 20 МБ.",
+            reply_markup=back_to_main_button()
+        )
+        user_states[user_id] = None
+        return
+    
+    # Проверяем тип файла
+    allowed_extensions = ['.pdf', '.docx', '.doc', '.txt']
+    file_extension = os.path.splitext(document.file_name)[1].lower()
+    
+    if file_extension not in allowed_extensions:
+        await update.message.reply_text(
+            "❌ Неподдерживаемый формат файла.\n\n"
+            "Поддерживаемые форматы: PDF, DOCX, DOC, TXT",
+            reply_markup=back_to_main_button()
+        )
+        user_states[user_id] = None
+        return
+    
+    # Показываем индикатор обработки
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        
+        # Создаем временный файл
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
+            await file.download_to_drive(temp_file.name)
+            temp_file_path = temp_file.name
+        
+        # Извлекаем текст из файла
+        document_text = extract_text_from_file(temp_file_path, file_extension)
+        
+        # Удаляем временный файл
+        os.unlink(temp_file_path)
+        
+        if not document_text or len(document_text.strip()) < 50:
+            await update.message.reply_text(
+                "❌ Не удалось извлечь текст из документа или документ слишком короткий.",
+                reply_markup=back_to_main_button()
+            )
+            user_states[user_id] = None
+            return
+        
+        # Анализируем документ
+        analysis_result = await analyze_document(document_text, user_id)
+        
+        # Форматируем ответ
+        formatted_response = f"""📄 **Анализ документа: {document.file_name}**
+
+📊 **Размер файла:** {document.file_size / 1024:.1f} КБ
+📝 **Тип файла:** {file_extension.upper()}
+📏 **Длина текста:** {len(document_text)} символов
+
+⚖️ **Юридический анализ:**
+
+{analysis_result}
+
+⚠️ *Данный анализ носит справочный характер. Для окончательного заключения обратитесь к квалифицированному юристу.*"""
+        
+        await update.message.reply_text(
+            formatted_response,
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+        
+        # Сбрасываем состояние пользователя
+        user_states[user_id] = None
+        
+    except Exception as e:
+        print(f"Ошибка при обработке документа: {e}")
+        await update.message.reply_text(
+            "❌ Произошла ошибка при обработке документа. Попробуйте еще раз.",
+            reply_markup=main_menu()
+        )
+        user_states[user_id] = None
+
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений пользователя"""
     user_id = str(update.effective_user.id)
     user_text = update.message.text
     
     # Проверяем состояние пользователя
-    if user_states.get(user_id) != 'asking_question':
+    if user_states.get(user_id) == 'asking_question':
+        # Обрабатываем вопрос
+        await process_legal_question(update, context, user_text, user_id)
+    elif user_states.get(user_id) == 'checking_document':
         await update.message.reply_text(
-            "Пожалуйста, используйте кнопки для навигации или нажмите '❓ Задать вопрос' для отправки запроса.",
+            "📄 Пожалуйста, загрузите документ для проверки.\n\n"
+            "Поддерживаемые форматы: PDF, DOCX, DOC, TXT\n"
+            "Максимальный размер: 20 МБ",
+            reply_markup=back_to_main_button()
+        )
+    else:
+        await update.message.reply_text(
+            "Пожалуйста, используйте кнопки для навигации.",
             reply_markup=main_menu()
         )
-        return
+
+async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str, user_id: str):
+    """Обрабатывает юридический вопрос пользователя"""
     
     if law_assistant is None:
         await update.message.reply_text(
             "❌ Извините, сервис временно недоступен. Попробуйте позже.",
             reply_markup=main_menu()
         )
+        user_states[user_id] = None
         return
     
     # Показываем индикатор печати
@@ -127,6 +296,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Как оформить развод через ЗАГС?\n"
             "• Какая ответственность за нарушение ПДД?\n\n"
             "Напишите ваш вопрос в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'check_document':
+        user_states[user_id] = 'checking_document'
+        await query.edit_message_text(
+            "📄 **Проверка документов**\n\n"
+            "Загрузите документ для анализа на соответствие российскому законодательству.\n\n"
+            "📋 **Что я проверю:**\n"
+            "• Соответствие формальным требованиям\n"
+            "• Наличие обязательных реквизитов\n"
+            "• Соответствие действующему законодательству\n"
+            "• Выявление нарушений и несоответствий\n"
+            "• Рекомендации по исправлению\n\n"
+            "📎 **Поддерживаемые форматы:**\n"
+            "• PDF (.pdf)\n"
+            "• Microsoft Word (.docx, .doc)\n"
+            "• Текстовые файлы (.txt)\n\n"
+            "📏 **Ограничения:**\n"
+            "• Максимальный размер: 20 МБ\n"
+            "• Документ должен содержать читаемый текст\n\n"
+            "Прикрепите файл к следующему сообщению:",
             parse_mode='Markdown',
             reply_markup=back_to_main_button()
         )
