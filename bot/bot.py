@@ -1,6 +1,6 @@
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from .config import TOKEN
-from .handlers import start, button_handler
+from .handlers import start, button_handler, handle_user_message
 
 def main():
     app = Application.builder().token(TOKEN).build()
