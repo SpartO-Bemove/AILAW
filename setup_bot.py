@@ -40,6 +40,7 @@ def check_chroma_db():
     else:
         print("❌ База данных Chroma не найдена")
         print(f"   Ожидается в: {db_path}")
+        print("   Убедитесь, что векторная база данных создана")
         return False
 
 def check_imports():
@@ -65,12 +66,55 @@ def check_imports():
         print("❌ openai не установлен")
         return False
     
+    try:
+        import redis
+        print("✅ redis установлен")
+    except ImportError:
+        print("❌ redis не установлен")
+        return False
+    
+    try:
+        import chromadb
+        print("✅ chromadb установлен")
+    except ImportError:
+        print("❌ chromadb не установлен")
+        return False
+    
+    return True
+
+def check_bot_structure():
+    """Проверяет структуру файлов бота"""
+    required_files = [
+        'bot/bot.py',
+        'bot/handlers.py',
+        'bot/keyboards.py',
+        'bot/config.py',
+        'neuralex-main/neuralex_main.py',
+        'neuralex-main/cache.py',
+        'neuralex-main/chains.py',
+        'neuralex-main/prompts.py',
+        'run_bot.py'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print("❌ Отсутствуют следующие файлы:")
+        for file_path in missing_files:
+            print(f"   - {file_path}")
+        return False
+    
+    print("✅ Все необходимые файлы найдены")
     return True
 
 def main():
     print("🔍 Проверка настройки телеграм-бота neuralex...\n")
     
     checks = [
+        check_bot_structure(),
         check_imports(),
         check_environment(),
         check_chroma_db()
@@ -79,6 +123,9 @@ def main():
     if all(checks):
         print("\n✅ Все проверки пройдены! Бот готов к запуску.")
         print("Запустите бота командой: python run_bot.py")
+        print("\n📝 Не забудьте:")
+        print("   - Запустить Redis сервер (если используете кэширование)")
+        print("   - Проверить токен бота в @BotFather")
     else:
         print("\n❌ Обнаружены проблемы. Исправьте их перед запуском бота.")
         sys.exit(1)
