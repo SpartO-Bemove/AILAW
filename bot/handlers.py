@@ -371,8 +371,23 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     logging.info(f"Обработка вопроса от пользователя {user_id}: {user_text[:100]}...")
     
     try:
+        # Дополнительная проверка law_assistant
+        if law_assistant is None:
+            logging.error("law_assistant is None при обработке вопроса")
+            await update.message.reply_text(
+                "❌ Сервис ИИ-консультаций не инициализирован.\n\n"
+                "Попробуйте перезапустить бота или обратитесь к администратору.",
+                parse_mode='Markdown',
+                reply_markup=main_menu()
+            )
+            if state_manager:
+                state_manager.clear_user_state(user_id)
+            return
+        
         # Получаем ответ от ИИ-юриста
+        logging.info(f"Отправляем запрос в law_assistant для пользователя {user_id}")
         answer, _ = law_assistant.conversational(user_text, user_id)
+        logging.info(f"Получен ответ от law_assistant: {len(answer)} символов")
         
         # Форматируем ответ
         formatted_answer = f"⚖️ **Юридическая консультация:**\n\n{answer}\n\n"
