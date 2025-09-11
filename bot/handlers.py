@@ -5,10 +5,11 @@ import json
 import tempfile
 import asyncio
 from datetime import datetime
-from openai import OpenAI
 
-# Добавляем путь к neuralex-main в sys.path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
+# Добавляем путь к neuralex-main
+neuralex_path = os.path.join(os.path.dirname(__file__), '..', 'neuralex-main')
+if neuralex_path not in sys.path:
+    sys.path.append(neuralex_path)
 
 from telegram import Update
 from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,79 +19,67 @@ from .keyboards import main_menu, laws_menu, back_to_main_button, settings_menu,
 from .analytics import BotAnalytics
 from .user_manager import UserManager
 from .rate_limiter import rate_limiter
+from .redis_manager import RedisManager
+from .state_manager import StateManager
 
 # Настройка логирования для handlers
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация компонентов
+# Глобальные компоненты
 law_assistant = None
 analytics = None
 user_manager = None
-openai_client = None
+redis_manager = None
+state_manager = None
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
+def initialize_components():
+    """Инициализирует все компоненты системы"""
+    global law_assistant, analytics, user_manager, redis_manager, state_manager
     
-    # Инициализация компонентов neuralex
-    openai_api_key = os.getenv('OPENAI_API_KEY')
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
-    
-    # Проверяем валидность API ключа
-    openai_client = OpenAI(api_key=openai_api_key)
-    
-    # Тестируем подключение к OpenAI
     try:
-        test_response = openai_client.models.list()
-        logger.info("OpenAI API подключение успешно")
-    except Exception as e:
-        logger.error(f"Ошибка подключения к OpenAI API: {e}")
-        raise
-    
-    from neuralex_main import neuralex
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-    from langchain_community.vectorstores import Chroma
-    from prompts import DOCUMENT_ANALYSIS_PROMPT
-    import fitz  # PyMuPDF для работы с PDF
-    import docx  # python-docx для работы с Word
-    
-    llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-    vector_store = Chroma(persist_directory="chroma_db_legal_bot_part1", embedding_function=embeddings)
-    
-    # Создаем экземпляр neuralex
-    law_assistant = neuralex(llm, embeddings, vector_store)
-    
-    # Инициализируем аналитику и менеджер пользователей
-    try:
-        import redis
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        # Инициализация Redis менеджера
         redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-        redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
-        # Проверяем подключение
-        redis_client.ping()
+        redis_manager = RedisManager(redis_url)
+        redis_client = redis_manager.client
+        
+        # Инициализация менеджера состояний
+        state_manager = StateManager(redis_client)
+        
+        # Инициализация аналитики и менеджера пользователей
         analytics = BotAnalytics(redis_client)
         user_manager = UserManager(redis_client)
-        logger.info("Redis подключен успешно")
+        
+        # Инициализация neuralex компонентов
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
+        
+        from neuralex_main import neuralex
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from langchain_community.vectorstores import Chroma
+        import fitz  # PyMuPDF для работы с PDF
+        import docx  # python-docx для работы с Word
+        
+        llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
+        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        vector_store = Chroma(persist_directory="chroma_db_legal_bot_part1", embedding_function=embeddings)
+        
+        # Создаем экземпляр neuralex
+        law_assistant = neuralex(llm, embeddings, vector_store, redis_url)
+        
+        logger.info("Все компоненты успешно инициализированы")
+        return True
+        
     except Exception as e:
-        logger.warning(f"Redis недоступен для аналитики: {e}")
-        analytics = BotAnalytics()
-        user_manager = UserManager()
-    
-    logger.info("Neuralex компоненты успешно инициализированы")
-    
-except Exception as e:
-    logger.error(f"Критическая ошибка инициализации: {e}")
-    # Устанавливаем флаг недоступности сервиса
-    law_assistant = None
-    openai_client = None
+        logger.error(f"Критическая ошибка инициализации: {e}")
+        return False
 
-# Словарь для отслеживания состояния пользователей
-user_states = {}
-
-# Словарь для хранения последних ответов (для оценки)
-last_answers = {}
+# Инициализируем компоненты при импорте модуля
+initialize_components()
 
 def extract_text_from_file(file_path, file_extension):
     """Извлекает текст из различных типов файлов"""
@@ -123,6 +112,8 @@ def extract_text_from_file(file_path, file_extension):
 
 async def analyze_document(document_text, user_id):
     """Анализирует документ на соответствие законодательству"""
+    from prompts import DOCUMENT_ANALYSIS_PROMPT
+    
     if law_assistant is None:
         return "❌ Сервис анализа документов временно недоступен."
     
@@ -146,8 +137,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "Пользователь"
     
-    # Сбрасываем состояние пользователя при старте
-    user_states[user_id] = None
+    # Сбрасываем состояние пользователя при старте  
+    if state_manager:
+        state_manager.clear_user_state(user_id)
     
     # Логируем действие и обновляем активность
     if analytics:
@@ -183,7 +175,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     
     # Проверяем состояние пользователя
-    if user_states.get(user_id) != 'checking_document':
+    current_state = state_manager.get_user_state(user_id) if state_manager else None
+    if current_state != 'checking_document':
         await update.message.reply_text(
             "Пожалуйста, сначала нажмите кнопку '📄 Проверить документ' в главном меню.",
             reply_markup=main_menu()
@@ -198,7 +191,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Файл слишком большой. Максимальный размер: 20 МБ.",
             reply_markup=back_to_main_button()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         return
     
     # Проверяем тип файла
@@ -211,7 +205,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Поддерживаемые форматы: PDF, DOCX, DOC, TXT",
             reply_markup=back_to_main_button()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         return
     
     # Показываем индикатор обработки
@@ -237,7 +232,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Не удалось извлечь текст из документа или документ слишком короткий.",
                 reply_markup=back_to_main_button()
             )
-            user_states[user_id] = None
+            if state_manager:
+                state_manager.clear_user_state(user_id)
             return
         
         logging.info(f"Анализ документа для пользователя {user_id}: {document.file_name}")
@@ -265,7 +261,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Сбрасываем состояние пользователя
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         
     except Exception as e:
         logging.error(f"Ошибка при обработке документа для пользователя {user_id}: {e}")
@@ -273,18 +270,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Произошла ошибка при обработке документа. Попробуйте еще раз.",
             reply_markup=main_menu()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
 
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений пользователя"""
     user_id = str(update.effective_user.id)
     user_text = update.message.text
     
+    current_state = state_manager.get_user_state(user_id) if state_manager else None
+    
     # Проверяем состояние пользователя
-    if user_states.get(user_id) == 'asking_question':
+    if current_state == 'asking_question':
         # Обрабатываем вопрос
         await process_legal_question(update, context, user_text, user_id)
-    elif user_states.get(user_id) == 'checking_document':
+    elif current_state == 'checking_document':
         await update.message.reply_text(
             "📄 Пожалуйста, загрузите документ для проверки.\n\n"
             "Поддерживаемые форматы: PDF, DOCX, DOC, TXT\n"
@@ -310,7 +310,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode='Markdown',
             reply_markup=back_to_main_button()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         return
     
     # Логируем вопрос
@@ -328,7 +329,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode='Markdown',
             reply_markup=main_menu()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         return
     
     # Показываем индикатор печати
@@ -345,11 +347,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         formatted_answer += "⚠️ *Данная информация носит справочный характер. Для решения серьезных правовых вопросов обратитесь к квалифицированному юристу.*"
         
         # Сохраняем ответ для возможной оценки
-        last_answers[user_id] = {
-            'question': user_text,
-            'answer': answer,
-            'timestamp': datetime.now().isoformat()
-        }
+        if state_manager:
+            state_manager.save_last_answer(user_id, user_text, answer)
         
         # Добавляем кнопку оценки
         keyboard = [
@@ -367,7 +366,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         logging.info(f"Успешно обработан вопрос пользователя {user_id}")
         
         # Сбрасываем состояние пользователя
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         
     except Exception as openai_error:
         # Специальная обработка ошибок OpenAI
@@ -407,7 +407,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             )
         
         logging.error(f"OpenAI ошибка для пользователя {user_id}: {openai_error}")
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
         
     except Exception as e:
         logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {e}")
@@ -415,7 +416,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             "❌ Произошла ошибка при обработке вашего запроса. Попробуйте еще раз.",
             reply_markup=main_menu()
         )
-        user_states[user_id] = None
+        if state_manager:
+            state_manager.clear_user_state(user_id)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик нажатий на кнопки"""
@@ -428,7 +430,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f"Пользователь {user_name} (ID: {user_id}) нажал кнопку: {query.data}")
     
     if query.data == 'ask':
-        user_states[user_id] = 'asking_question'
+        if state_manager:
+            state_manager.set_user_state(user_id, 'asking_question')
         if analytics:
             analytics.log_user_action(user_id, 'click_ask')
         await query.edit_message_text(
@@ -445,7 +448,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'check_document':
-        user_states[user_id] = 'checking_document'
+        if state_manager:
+            state_manager.set_user_state(user_id, 'checking_document')
         if analytics:
             analytics.log_user_action(user_id, 'click_check_document')
         await query.edit_message_text(
@@ -546,7 +550,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'back_to_main':
-        user_states[user_id] = None  # Сбрасываем состояние
+        if state_manager:
+            state_manager.clear_user_state(user_id)  # Сбрасываем состояние
         await query.edit_message_text(
             f"👋 С возвращением, {user_name}!\n\nВыберите действие:",
             reply_markup=main_menu()
@@ -568,7 +573,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'rate_last_answer':
-        if user_id in last_answers:
+        last_answer = state_manager.get_last_answer(user_id) if state_manager else None
+        if last_answer:
             await query.edit_message_text(
                 "⭐ **Оцените качество ответа**\n\n"
                 "Насколько полезным был последний ответ?",
@@ -583,8 +589,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data.startswith('rate_'):
         rating = int(query.data.split('_')[1])
-        if user_id in last_answers and analytics:
-            last_answer = last_answers[user_id]
+        last_answer = state_manager.get_last_answer(user_id) if state_manager else None
+        if last_answer and analytics:
             analytics.log_question_rating(user_id, last_answer['question'], rating)
             analytics.log_user_action(user_id, 'rate_answer', {'rating': rating})
             
@@ -597,7 +603,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
             # Удаляем оцененный ответ
-            del last_answers[user_id]
+            if state_manager:
+                state_manager.clear_last_answer(user_id)
         else:
             await query.edit_message_text(
                 "❌ Ошибка при сохранении оценки",

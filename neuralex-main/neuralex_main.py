@@ -18,44 +18,29 @@ logger = logging.getLogger(__name__)
 
 class neuralex:
     """
-    neuralex is a conversational AI interface that leverages a retrieval-augmented generation (RAG) pipeline 
-    to answer user queries based on vector search and LLM responses. It supports Redis-based caching to improve 
-    performance and stores session-based chat histories in memory.
-
-    Attributes:
-        llm: An instance of the language model to use (e.g., OpenAI, Anthropic, etc.).
-        embeddings: Embedding model used for vectorization of text.
-        vector_store: A vector store (e.g., Chroma, FAISS) used for semantic retrieval.
-        cache: Instance of RedisCache for caching responses and chat histories.
-
-    Args:
-        llm (BaseLanguageModel): The LLM to generate responses.
-        embeddings (Embeddings): Embedding model used for vector search.
-        vector_store (VectorStore): A vector store instance to fetch relevant documents.
-        redis_url (str): Redis connection string. Defaults to "redis://localhost:6379/0".
-
-    Methods:
-        get_session_history(session_id: str) -> RedisChatMessageHistory:
-            Retrieves or initializes the chat history for the given session ID.
-        
-        conversational(query: str, session_id: str) -> Tuple[str, list]:
-            Handles the user query, checks for cached responses, invokes RAG pipeline if necessary,
-            updates history, and returns answer and updated messages.
+    Conversational AI для юридических консультаций с RAG pipeline
     """
     store = {}
     store_lock = threading.Lock()
 
-    def __init__(self, llm, embeddings, vector_store, redis_url="redis://localhost:6379/0"):
+    def __init__(self, llm, embeddings, vector_store, redis_url=None):
         self.llm = llm
         self.embeddings = embeddings
         self.vector_store = vector_store
         
-        try:
-            self.cache = RedisCache(redis_url)
-            logger.info(f"Redis кэш инициализирован: {redis_url}")
-        except Exception as e:
-            logger.error(f"Ошибка инициализации Redis кэша: {e}")
-            self.cache = None
+        # Инициализируем кэш с внешним Redis клиентом
+        redis_client = None
+        if redis_url:
+            try:
+                import redis
+                redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+                redis_client.ping()
+                logger.info(f"Redis кэш инициализирован: {redis_url}")
+            except Exception as e:
+                logger.error(f"Ошибка инициализации Redis кэша: {e}")
+                redis_client = None
+        
+        self.cache = RedisCache(redis_client)
 
     def get_session_history(self, session_id):
         with neuralex.store_lock:
