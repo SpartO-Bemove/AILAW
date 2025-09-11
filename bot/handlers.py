@@ -236,6 +236,16 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Показываем индикатор обработки
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     
+    # Отправляем промежуточное сообщение для анализа документа
+    analyzing_message = await update.message.reply_text(
+        "📄 **NEURALEX анализирует документ...**\n\n"
+        "🔍 Извлекаю текст из файла\n"
+        "⚖️ Проверяю соответствие законодательству\n"
+        "📋 Готовлю детальный анализ\n"
+        "⏳ Это займет несколько секунд",
+        parse_mode='Markdown'
+    )
+    
     try:
         # Скачиваем файл
         file = await context.bot.get_file(document.file_id)
@@ -265,6 +275,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Анализируем документ
         analysis_result = await analyze_document(document_text, user_id)
         
+        # Удаляем промежуточное сообщение
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=analyzing_message.message_id
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось удалить промежуточное сообщение анализа: {e}")
+        
         # Форматируем ответ
         formatted_response = f"""📄 **Анализ документа:** {document.file_name}
 
@@ -289,6 +308,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state_manager.clear_user_state(user_id)
         
     except Exception as e:
+        # Удаляем промежуточное сообщение при ошибке
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=analyzing_message.message_id
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке анализа: {e}")
+        
         logging.error(f"Ошибка при обработке документа для пользователя {user_id}: {e}")
         await update.message.reply_text(
             "❌ Произошла ошибка при обработке документа. Попробуйте еще раз.",
@@ -366,6 +394,15 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     # Показываем индикатор печати
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     
+    # Отправляем промежуточное сообщение
+    thinking_message = await update.message.reply_text(
+        "🤖 **NEURALEX анализирует ваш вопрос...**\n\n"
+        "⚡ Ищу релевантную информацию в базе законов\n"
+        "🧠 Готовлю развернутый ответ\n"
+        "⏳ Это займет несколько секунд",
+        parse_mode='Markdown'
+    )
+    
     logging.info(f"Обработка вопроса от пользователя {user_id}: {user_text[:100]}...")
     
     try:
@@ -380,6 +417,15 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         # Сохраняем ответ для возможной оценки
         if state_manager:
             state_manager.save_last_answer(user_id, user_text, answer)
+        
+        # Удаляем промежуточное сообщение
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=thinking_message.message_id
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось удалить промежуточное сообщение: {e}")
         
         # Добавляем кнопку оценки
         keyboard = [
@@ -402,6 +448,15 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             state_manager.clear_user_state(user_id)
         
     except Exception as openai_error:
+        # Удаляем промежуточное сообщение при ошибке
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=thinking_message.message_id
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке: {e}")
+        
         # Специальная обработка ошибок OpenAI
         error_message = str(openai_error).lower()
         logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {openai_error}")
@@ -444,6 +499,15 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             state_manager.clear_user_state(user_id)
         
     except Exception as e:
+        # Удаляем промежуточное сообщение при ошибке
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=thinking_message.message_id
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке: {e}")
+        
         logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {e}")
         await update.message.reply_text(
             "❌ Произошла ошибка при обработке вашего запроса. Попробуйте еще раз.",
