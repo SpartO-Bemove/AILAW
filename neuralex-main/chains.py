@@ -5,14 +5,17 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-def get_rag_chain(llm, vector_store, system_prompt, qa_prompt):
+def get_rag_chain(llm, vector_store, system_prompt, qa_prompt, fast_mode=False):
     """
-    Создает современную RAG цепочку с поддержкой истории чата
+    Создает RAG цепочку с оптимизацией скорости
     """
     # Создаем retriever
+    k_docs = 5 if fast_mode else 10  # Меньше документов для быстрого режима
+    score_threshold = 0.4 if fast_mode else 0.3  # Выше порог для быстрого режима
+    
     retriever = vector_store.as_retriever(
         search_type="similarity_score_threshold",
-        search_kwargs={"k": 10, "score_threshold": 0.3}
+        search_kwargs={"k": k_docs, "score_threshold": score_threshold}
     )
     
     # Промпт для создания контекстно-зависимого поиска
