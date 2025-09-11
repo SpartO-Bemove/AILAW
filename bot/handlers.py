@@ -40,28 +40,34 @@ def initialize_components():
     global law_assistant, analytics, user_manager, redis_manager, state_manager
     
     try:
+        print("🔄 Инициализация компонентов бота...")
+        
         from dotenv import load_dotenv
         load_dotenv()
         
         # Инициализация Redis менеджера
         redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        print(f"🔴 Подключение к Redis: {redis_url}")
         redis_manager = RedisManager(redis_url)
         redis_client = redis_manager.client
         
         # Инициализация менеджера состояний
         state_manager = StateManager(redis_client)
+        print("✅ StateManager инициализирован")
         
         # Инициализация уведомлений администратора (будет инициализирован позже с bot instance)
         
         # Инициализация аналитики и менеджера пользователей
         analytics = BotAnalytics(redis_client)
         user_manager = UserManager(redis_client)
+        print("✅ Analytics и UserManager инициализированы")
         
         # Инициализация neuralex компонентов
         openai_api_key = os.getenv('OPENAI_API_KEY')
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
         
+        print("🧠 Инициализация ИИ компонентов...")
         from neuralex_main import neuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         from langchain_community.vectorstores import Chroma
@@ -69,17 +75,27 @@ def initialize_components():
         import docx  # python-docx для работы с Word
         
         llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
+        print("✅ LLM инициализирован")
+        
         embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        print("✅ Embeddings инициализированы")
+        
         vector_store = Chroma(persist_directory="chroma_db_legal_bot_part1", embedding_function=embeddings)
+        print("✅ Vector store инициализирован")
         
         # Создаем экземпляр neuralex
         law_assistant = neuralex(llm, embeddings, vector_store, redis_url)
+        print("✅ Neuralex инициализирован")
         
         logger.info("Все компоненты успешно инициализированы")
+        print("🎉 Все компоненты успешно инициализированы!")
         return True
         
     except Exception as e:
         logger.error(f"Критическая ошибка инициализации: {e}")
+        print(f"❌ Критическая ошибка инициализации: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # Инициализируем компоненты при импорте модуля
