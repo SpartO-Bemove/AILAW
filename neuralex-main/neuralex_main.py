@@ -1,5 +1,5 @@
-import threading
 import logging
+import threading
 import time
 from openai import OpenAI
 from cache import RedisCache

@@ -2,6 +2,7 @@
 Расширенная версия neuralex с поддержкой динамической загрузки документов
 """
 import logging
+import logging
 import time
 import threading
 from typing import List, Optional

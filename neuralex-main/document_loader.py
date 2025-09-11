@@ -1,8 +1,8 @@
 """
 Модуль для загрузки и обработки дополнительных юридических документов
 """
-import os
 import logging
+import os
 import hashlib
 from typing import List, Dict, Optional
 from pathlib import Path

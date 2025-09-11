@@ -1,6 +1,6 @@
+import logging
 import redis
 import hashlib
-import logging
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 
 logger = logging.getLogger(__name__)
