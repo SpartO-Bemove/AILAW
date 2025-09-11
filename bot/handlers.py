@@ -375,7 +375,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         answer, _ = law_assistant.conversational(user_text, user_id)
         
         # Форматируем ответ
-        formatted_answer = f"⚖️ **Юридическая консультация:**\n\n{answer}\n\n"
+        formatted_answer = f"⚖️ **Юридическая консультация**\n\n{answer}\n\n"
         formatted_answer += "⚠️ *Данная информация носит справочный характер. Для решения серьезных правовых вопросов обратитесь к квалифицированному юристу.*"
         
         # Сохраняем ответ для возможной оценки
