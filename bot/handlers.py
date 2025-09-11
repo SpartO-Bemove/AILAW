@@ -391,7 +391,6 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         
         await update.message.reply_text(
             formatted_answer,
-            parse_mode='Markdown',
             reply_markup=reply_markup
         )
         
