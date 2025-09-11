@@ -2,12 +2,16 @@ import logging
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from .config import TOKEN
 from .handlers import start, button_handler, handle_user_message, handle_document
+from .scheduler import scheduler
 
 logger = logging.getLogger(__name__)
 
 def main():
     """Основная функция запуска бота"""
     try:
+        # Запускаем планировщик
+        scheduler.start()
+        
         app = Application.builder().token(TOKEN).build()
 
         # Добавляем обработчики
@@ -25,6 +29,9 @@ def main():
     except Exception as e:
         logger.error(f"Критическая ошибка при запуске бота: {e}")
         raise
+    finally:
+        # Останавливаем планировщик при завершении
+        scheduler.stop()
 
 if __name__ == "__main__":
     main()

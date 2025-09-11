@@ -6,6 +6,8 @@ def main_menu():
         [InlineKeyboardButton("❓ Задать вопрос", callback_data='ask')],
         [InlineKeyboardButton("📄 Проверить документ", callback_data='check_document')],
         [InlineKeyboardButton("📚 Посмотреть законы", callback_data='laws')],
+        [InlineKeyboardButton("⚙️ Настройки", callback_data='settings')],
+        [InlineKeyboardButton("💬 Обратная связь", callback_data='feedback')],
         [InlineKeyboardButton("ℹ️ О боте", callback_data='about')],
         [InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')]
     ]
@@ -28,4 +30,39 @@ def laws_menu():
 def back_to_main_button():
     """Кнопка возврата в главное меню"""
     keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+    return InlineKeyboardMarkup(keyboard)
+
+def settings_menu():
+    """Меню настроек пользователя"""
+    keyboard = [
+        [InlineKeyboardButton("🔔 Уведомления", callback_data='settings_notifications')],
+        [InlineKeyboardButton("📊 Статистика", callback_data='settings_stats')],
+        [InlineKeyboardButton("🌐 Язык", callback_data='settings_language')],
+        [InlineKeyboardButton("📝 Экспорт истории", callback_data='export_history')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def feedback_menu():
+    """Меню обратной связи"""
+    keyboard = [
+        [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_answer')],
+        [InlineKeyboardButton("🐛 Сообщить об ошибке", callback_data='report_bug')],
+        [InlineKeyboardButton("💡 Предложить улучшение", callback_data='suggest_improvement')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def rating_keyboard():
+    """Клавиатура для оценки ответа"""
+    keyboard = [
+        [
+            InlineKeyboardButton("⭐", callback_data='rate_1'),
+            InlineKeyboardButton("⭐⭐", callback_data='rate_2'),
+            InlineKeyboardButton("⭐⭐⭐", callback_data='rate_3'),
+            InlineKeyboardButton("⭐⭐⭐⭐", callback_data='rate_4'),
+            InlineKeyboardButton("⭐⭐⭐⭐⭐", callback_data='rate_5')
+        ],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
     return InlineKeyboardMarkup(keyboard)

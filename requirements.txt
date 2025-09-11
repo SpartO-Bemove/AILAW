@@ -41,3 +41,6 @@ packaging>=23.2,<25
 protobuf>=3.20,<6
 rich>=10.14,<14
 tenacity>=8.1,<9
+
+# Additional utilities
+schedule>=1.2.0

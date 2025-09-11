@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+from datetime import datetime
 
 # Добавляем путь к neuralex-main в sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
@@ -9,7 +10,10 @@ from telegram import Update
 from telegram import Document
 from telegram.ext import ContextTypes
 
-from .keyboards import main_menu, laws_menu, back_to_main_button
+from .keyboards import main_menu, laws_menu, back_to_main_button, settings_menu, feedback_menu, rating_keyboard
+from .analytics import BotAnalytics
+from .user_manager import UserManager
+from .rate_limiter import rate_limiter
 
 try:
     from neuralex_main import neuralex
@@ -40,6 +44,17 @@ try:
     # Создаем экземпляр neuralex
     law_assistant = neuralex(llm, embeddings, vector_store)
     
+    # Инициализируем аналитику и менеджер пользователей
+    try:
+        import redis
+        redis_client = redis.Redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'), decode_responses=True)
+        analytics = BotAnalytics(redis_client)
+        user_manager = UserManager(redis_client)
+    except Exception as e:
+        logger.warning(f"Redis недоступен для аналитики: {e}")
+        analytics = BotAnalytics()
+        user_manager = UserManager()
+    
     logger.info("Neuralex компоненты успешно инициализированы")
     
 except ImportError as e:
@@ -51,6 +66,9 @@ except Exception as e:
 
 # Словарь для отслеживания состояния пользователей
 user_states = {}
+
+# Словарь для хранения последних ответов (для оценки)
+last_answers = {}
 
 def extract_text_from_file(file_path, file_extension):
     """Извлекает текст из различных типов файлов"""
@@ -116,6 +134,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Сбрасываем состояние пользователя при старте
     user_states[user_id] = None
+    
+    # Логируем действие и обновляем активность
+    if analytics:
+        analytics.log_user_action(user_id, 'start', {'user_name': user_name})
+    if user_manager:
+        user_manager.update_last_activity(user_id)
     
     logging.info(f"Пользователь {user_name} (ID: {user_id}) запустил бота")
     
@@ -262,6 +286,23 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str, user_id: str):
     """Обрабатывает юридический вопрос пользователя"""
     
+    # Проверяем rate limit
+    if not rate_limiter.is_allowed(user_id):
+        remaining_time = rate_limiter.get_reset_time(user_id)
+        await update.message.reply_text(
+            f"⏰ **Превышен лимит запросов**\n\n"
+            f"Попробуйте снова через {int(remaining_time)} секунд.\n"
+            f"Это ограничение помогает обеспечить стабильную работу бота для всех пользователей.",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+        user_states[user_id] = None
+        return
+    
+    # Логируем вопрос
+    if analytics:
+        analytics.log_user_action(user_id, 'ask_question', {'question_length': len(user_text)})
+    
     if law_assistant is None:
         await update.message.reply_text(
             "❌ Извините, сервис временно недоступен. Попробуйте позже.",
@@ -283,10 +324,25 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         formatted_answer = f"⚖️ **Юридическая консультация:**\n\n{answer}\n\n"
         formatted_answer += "⚠️ *Данная информация носит справочный характер. Для решения серьезных правовых вопросов обратитесь к квалифицированному юристу.*"
         
+        # Сохраняем ответ для возможной оценки
+        last_answers[user_id] = {
+            'question': user_text,
+            'answer': answer,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Добавляем кнопку оценки
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = [
+            [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_last_answer')],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             formatted_answer,
             parse_mode='Markdown',
-            reply_markup=back_to_main_button()
+            reply_markup=reply_markup
         )
         
         logging.info(f"Успешно обработан вопрос пользователя {user_id}")
@@ -314,6 +370,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == 'ask':
         user_states[user_id] = 'asking_question'
+        if analytics:
+            analytics.log_user_action(user_id, 'click_ask')
         await query.edit_message_text(
             "❓ **Задайте ваш юридический вопрос**\n\n"
             "Опишите вашу ситуацию максимально подробно. Чем больше деталей вы предоставите, "
@@ -329,6 +387,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data == 'check_document':
         user_states[user_id] = 'checking_document'
+        if analytics:
+            analytics.log_user_action(user_id, 'click_check_document')
         await query.edit_message_text(
             "📄 **Проверка документов**\n\n"
             "Загрузите документ для анализа на соответствие российскому законодательству.\n\n"
@@ -351,6 +411,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'laws':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_laws')
         await query.edit_message_text(
             "📚 **Доступные категории законов:**\n\n"
             "Выберите интересующую вас область права для получения общей информации:",
@@ -359,6 +421,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'about':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_about')
         about_text = """
 ℹ️ **О боте Neuralex**
 
@@ -384,6 +448,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == 'clear_history':
+        if analytics:
+            analytics.log_user_action(user_id, 'clear_history')
         # Очищаем историю пользователя
         if law_assistant:
             try:
@@ -411,6 +477,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     
     elif query.data.startswith('law_'):
+        if analytics:
+            analytics.log_user_action(user_id, 'view_law', {'law': query.data})
         law_info = get_law_info(query.data)
         await query.edit_message_text(
             law_info,
@@ -424,6 +492,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👋 С возвращением, {user_name}!\n\nВыберите действие:",
             reply_markup=main_menu()
         )
+    
+    elif query.data == 'settings':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_settings')
+        await show_settings(query, user_id)
+    
+    elif query.data == 'feedback':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_feedback')
+        await query.edit_message_text(
+            "💬 **Обратная связь**\n\n"
+            "Ваше мнение важно для нас! Помогите улучшить бота:",
+            parse_mode='Markdown',
+            reply_markup=feedback_menu()
+        )
+    
+    elif query.data == 'rate_last_answer':
+        if user_id in last_answers:
+            await query.edit_message_text(
+                "⭐ **Оцените качество ответа**\n\n"
+                "Насколько полезным был последний ответ?",
+                parse_mode='Markdown',
+                reply_markup=rating_keyboard()
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Нет ответа для оценки",
+                reply_markup=back_to_main_button()
+            )
+    
+    elif query.data.startswith('rate_'):
+        rating = int(query.data.split('_')[1])
+        if user_id in last_answers and analytics:
+            last_answer = last_answers[user_id]
+            analytics.log_question_rating(user_id, last_answer['question'], rating)
+            analytics.log_user_action(user_id, 'rate_answer', {'rating': rating})
+            
+            await query.edit_message_text(
+                f"✅ **Спасибо за оценку!**\n\n"
+                f"Вы поставили {rating} {'⭐' * rating}\n\n"
+                f"Ваша обратная связь поможет нам стать лучше!",
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+            
+            # Удаляем оцененный ответ
+            del last_answers[user_id]
+        else:
+            await query.edit_message_text(
+                "❌ Ошибка при сохранении оценки",
+                reply_markup=back_to_main_button()
+            )
+    
+    elif query.data == 'settings_stats':
+        await show_user_stats(query, user_id)
+    
+    elif query.data == 'export_history':
+        await export_user_history(query, user_id)
     
     else:
         logging.warning(f"Неизвестная команда кнопки: {query.data} от пользователя {user_id}")
@@ -561,3 +687,99 @@ def get_law_info(law_code):
     }
     
     return law_descriptions.get(law_code, "Информация о данном законе временно недоступна.")
+
+async def show_settings(query, user_id: str):
+    """Показывает настройки пользователя"""
+    if user_manager:
+        settings = user_manager.get_user_settings(user_id)
+        notifications_status = "🔔 Включены" if settings.get('notifications', True) else "🔕 Выключены"
+        language = settings.get('language', 'ru')
+        
+        settings_text = f"""
+⚙️ **Настройки**
+
+🔔 **Уведомления:** {notifications_status}
+🌐 **Язык:** {language.upper()}
+📅 **Дата регистрации:** {settings.get('created_at', 'Неизвестно')[:10]}
+⏰ **Последняя активность:** {settings.get('last_active', 'Неизвестно')[:10]}
+        """
+    else:
+        settings_text = "⚙️ **Настройки**\n\nНастройки временно недоступны."
+    
+    await query.edit_message_text(
+        settings_text,
+        parse_mode='Markdown',
+        reply_markup=settings_menu()
+    )
+
+async def show_user_stats(query, user_id: str):
+    """Показывает статистику пользователя"""
+    if analytics:
+        stats = analytics.get_user_stats(user_id)
+        avg_rating = analytics.get_average_rating()
+        
+        stats_text = f"""
+📊 **Ваша статистика**
+
+❓ **Задано вопросов:** {stats.get('ask_question', 0)}
+📄 **Проверено документов:** {stats.get('check_document', 0)}
+📚 **Просмотрено законов:** {stats.get('view_law', 0)}
+🔄 **Всего действий:** {stats.get('total_actions', 0)}
+
+⭐ **Средний рейтинг бота:** {avg_rating:.1f}/5.0
+        """
+    else:
+        stats_text = "📊 **Статистика**\n\nСтатистика временно недоступна."
+    
+    await query.edit_message_text(
+        stats_text,
+        parse_mode='Markdown',
+        reply_markup=back_to_main_button()
+    )
+
+async def export_user_history(query, user_id: str):
+    """Экспортирует историю пользователя"""
+    if user_manager:
+        history_json = user_manager.export_user_history(user_id)
+        if history_json:
+            # Создаем временный файл
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                f.write(history_json)
+                temp_path = f.name
+            
+            try:
+                # Отправляем файл
+                with open(temp_path, 'rb') as f:
+                    await query.message.reply_document(
+                        document=f,
+                        filename=f"neuralex_history_{user_id}_{datetime.now().strftime('%Y%m%d')}.json",
+                        caption="📝 **Экспорт истории**\n\nВаша история чатов с ботом в формате JSON."
+                    )
+                
+                await query.edit_message_text(
+                    "✅ **История экспортирована**\n\n"
+                    "Файл с вашей историей отправлен выше.",
+                    parse_mode='Markdown',
+                    reply_markup=back_to_main_button()
+                )
+                
+                # Удаляем временный файл
+                os.unlink(temp_path)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при отправке файла истории: {e}")
+                await query.edit_message_text(
+                    "❌ Ошибка при экспорте истории",
+                    reply_markup=back_to_main_button()
+                )
+        else:
+            await query.edit_message_text(
+                "❌ Не удалось экспортировать историю",
+                reply_markup=back_to_main_button()
+            )
+    else:
+        await query.edit_message_text(
+            "❌ Экспорт истории временно недоступен",
+            reply_markup=back_to_main_button()
+        )
