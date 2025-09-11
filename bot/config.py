@@ -23,9 +23,15 @@ if not TOKEN:
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY не найден в переменных окружения. Добавьте его в файл .env")
 
+# Проверяем формат токенов
+if TOKEN and not TOKEN.startswith(('1', '2', '5', '6', '7')):
+    logging.warning("TELEGRAM_BOT_TOKEN имеет подозрительный формат")
 # Настройки бота
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 МБ
 ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.txt']
 CHROMA_DB_PATH = "chroma_db_legal_bot_part1"
+
+if OPENAI_API_KEY and not OPENAI_API_KEY.startswith('sk-'):
+    logging.warning("OPENAI_API_KEY должен начинаться с 'sk-'")
 
 logging.info("Конфигурация бота загружена успешно")

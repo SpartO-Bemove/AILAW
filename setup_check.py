@@ -158,6 +158,16 @@ def test_bot_initialization():
         from bot.config import TOKEN, OPENAI_API_KEY
         print("✅ Конфигурация: загружена успешно")
         
+        # Тестируем подключение к OpenAI
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        try:
+            models = openai_client.models.list()
+            print("✅ OpenAI API: подключение успешно")
+        except Exception as e:
+            print(f"❌ OpenAI API: ошибка подключения ({e})")
+            return False
+        
         # Тестируем импорт основных модулей
         from bot.handlers import start, button_handler
         print("✅ Обработчики: импортированы успешно")

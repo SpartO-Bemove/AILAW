@@ -1,6 +1,7 @@
 import threading
 import logging
 import time
+from openai import OpenAI
 from .cache import RedisCache
 from langchain.schema import HumanMessage, AIMessage
 from .chains import get_rag_chain
@@ -130,6 +131,16 @@ class neuralex:
             
             return answer, chat_history_obj.messages
             
+        except Exception as openai_error:
+            # Проверяем, является ли это ошибкой OpenAI
+            error_str = str(openai_error).lower()
+            if any(keyword in error_str for keyword in ['openai', 'api key', 'rate limit', 'quota', 'authentication']):
+                logger.error(f"OpenAI API ошибка для session_id {session_id}: {openai_error}")
+                # Пробрасываем ошибку OpenAI выше для специальной обработки
+                raise openai_error
+            else:
+                logger.error(f"Общая ошибка при обработке запроса для session_id {session_id}: {openai_error}")
+                raise
         except Exception as e:
             logger.error(f"Ошибка при обработке запроса для session_id {session_id}: {e}")
             raise

@@ -5,6 +5,7 @@ import json
 import tempfile
 import asyncio
 from datetime import datetime
+from openai import OpenAI
 
 # Добавляем путь к neuralex-main в sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
@@ -26,21 +27,33 @@ logger = logging.getLogger(__name__)
 law_assistant = None
 analytics = None
 user_manager = None
+openai_client = None
 
 try:
     from dotenv import load_dotenv
     load_dotenv()
+    
+    # Инициализация компонентов neuralex
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    if not openai_api_key:
+        raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
+    
+    # Проверяем валидность API ключа
+    openai_client = OpenAI(api_key=openai_api_key)
+    
+    # Тестируем подключение к OpenAI
+    try:
+        test_response = openai_client.models.list()
+        logger.info("OpenAI API подключение успешно")
+    except Exception as e:
+        logger.error(f"Ошибка подключения к OpenAI API: {e}")
+        raise
     
     from neuralex_main import neuralex
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from langchain_community.vectorstores import Chroma
     import fitz  # PyMuPDF для работы с PDF
     import docx  # python-docx для работы с Word
-    
-    # Инициализация компонентов neuralex
-    openai_api_key = os.getenv('OPENAI_API_KEY')
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
     
     llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
@@ -67,6 +80,10 @@ try:
     logger.info("Neuralex компоненты успешно инициализированы")
     
 except Exception as e:
+    logger.error(f"Критическая ошибка инициализации: {e}")
+    # Устанавливаем флаг недоступности сервиса
+    law_assistant = None
+    openai_client = None
 
 # Словарь для отслеживания состояния пользователей
 user_states = {}
@@ -309,7 +326,13 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     
     if law_assistant is None:
         await update.message.reply_text(
-            "❌ Извините, сервис временно недоступен. Попробуйте позже.",
+            "❌ Извините, сервис ИИ-консультаций временно недоступен.\n\n"
+            "Возможные причины:\n"
+            "• Проблемы с подключением к OpenAI API\n"
+            "• Неверный API ключ\n"
+            "• Превышен лимит запросов OpenAI\n\n"
+            "Попробуйте позже или обратитесь к администратору.",
+            parse_mode='Markdown',
             reply_markup=main_menu()
         )
         user_states[user_id] = None
@@ -351,6 +374,46 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         logging.info(f"Успешно обработан вопрос пользователя {user_id}")
         
         # Сбрасываем состояние пользователя
+        user_states[user_id] = None
+        
+    except Exception as openai_error:
+        # Специальная обработка ошибок OpenAI
+        error_message = str(openai_error).lower()
+        
+        if "rate limit" in error_message or "quota" in error_message:
+            await update.message.reply_text(
+                "⏰ **Превышен лимит запросов к OpenAI**\n\n"
+                "Слишком много запросов в данный момент. "
+                "Попробуйте через несколько минут.",
+                parse_mode='Markdown',
+                reply_markup=main_menu()
+            )
+        elif "api key" in error_message or "authentication" in error_message:
+            await update.message.reply_text(
+                "🔑 **Проблема с аутентификацией**\n\n"
+                "Проблемы с API ключом OpenAI. "
+                "Обратитесь к администратору.",
+                parse_mode='Markdown',
+                reply_markup=main_menu()
+            )
+        elif "insufficient_quota" in error_message:
+            await update.message.reply_text(
+                "💳 **Исчерпан лимит OpenAI**\n\n"
+                "Закончились кредиты на аккаунте OpenAI. "
+                "Обратитесь к администратору.",
+                parse_mode='Markdown',
+                reply_markup=main_menu()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Произошла ошибка при обработке вашего запроса.\n\n"
+                f"Детали: {str(openai_error)[:100]}...\n\n"
+                "Попробуйте еще раз или обратитесь к администратору.",
+                parse_mode='Markdown',
+                reply_markup=main_menu()
+            )
+        
+        logging.error(f"OpenAI ошибка для пользователя {user_id}: {openai_error}")
         user_states[user_id] = None
         
     except Exception as e:
