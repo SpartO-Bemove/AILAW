@@ -190,9 +190,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name or "Пользователь"
     
     # Проверяем админ-команды
-    if query.data.startswith('admin_') and admin_handlers:
-        await admin_handlers.handle_admin_callback(query, user_id)
-        return
+    # Эта проверка будет в button_handler
     
     # Сбрасываем состояние пользователя при старте  
     if state_manager:
@@ -225,6 +223,219 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(welcome_text, reply_markup=main_menu())
 
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатий на кнопки"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = str(update.effective_user.id)
+    user_name = update.effective_user.first_name or "Пользователь"
+    
+    # Проверяем админ-команды
+    if query.data.startswith('admin_') and admin_handlers:
+        await admin_handlers.handle_admin_callback(query, user_id)
+        return
+    
+    if query.data == 'ask':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'asking_question')
+        if analytics:
+            analytics.log_user_action(user_id, 'click_ask_question')
+        await query.edit_message_text(
+            "❓ **Задайте ваш юридический вопрос**\n\n"
+            "Опишите вашу ситуацию максимально подробно. "
+            "Чем больше деталей вы предоставите, тем точнее будет ответ.\n\n"
+            "💡 **Примеры хороших вопросов:**\n"
+            "• Могу ли я расторгнуть трудовой договор без отработки?\n"
+            "• Какие документы нужны для развода через ЗАГС?\n"
+            "• Как вернуть деньги за некачественный товар?\n\n"
+            "Напишите ваш вопрос в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'check_document':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'checking_document')
+        if analytics:
+            analytics.log_user_action(user_id, 'click_check_document')
+        await query.edit_message_text(
+            "📄 **Проверка документов**\n\n"
+            "Загрузите документ для анализа на соответствие российскому законодательству.\n\n"
+            "📋 **Что я проверю:**\n"
+            "• Соответствие формальным требованиям\n"
+            "• Наличие обязательных реквизитов\n"
+            "• Соответствие действующему законодательству\n"
+            "• Выявление нарушений и несоответствий\n"
+            "• Рекомендации по исправлению\n\n"
+            "📎 **Поддерживаемые форматы:**\n"
+            "• PDF (.pdf)\n"
+            "• Microsoft Word (.docx, .doc)\n"
+            "• Текстовые файлы (.txt)\n\n"
+            "📏 **Ограничения:**\n"
+            "• Максимальный размер: 20 МБ\n"
+            "• Документ должен содержать читаемый текст\n\n"
+            "Прикрепите файл к следующему сообщению:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'clear_history':
+        if analytics:
+            analytics.log_user_action(user_id, 'clear_history')
+        # Очищаем историю пользователя
+        if law_assistant:
+            try:
+                # Очищаем историю в Redis
+                chat_history = law_assistant.get_session_history(user_id)
+                chat_history.clear()
+                await query.edit_message_text(
+                    "🔄 **История чата очищена**\n\n"
+                    "Ваша история общения с ботом была успешно удалена. "
+                    "Теперь я не буду помнить предыдущие вопросы и ответы.",
+                    parse_mode='Markdown',
+                    reply_markup=back_to_main_button()
+                )
+                logging.info(f"История чата очищена для пользователя {user_id}")
+            except Exception as e:
+                logging.error(f"Ошибка при очистке истории для пользователя {user_id}: {e}")
+                await query.edit_message_text(
+                    "❌ Произошла ошибка при очистке истории.",
+                    reply_markup=back_to_main_button()
+                )
+        else:
+            await query.edit_message_text(
+                "❌ Сервис временно недоступен.",
+                reply_markup=back_to_main_button()
+            )
+    
+    elif query.data == 'back_to_main':
+        if state_manager:
+            state_manager.clear_user_state(user_id)  # Сбрасываем состояние
+        await query.edit_message_text(
+            f"👋 С возвращением, {user_name}!\n\nВыберите действие:",
+            reply_markup=main_menu()
+        )
+    
+    elif query.data == 'settings':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_settings')
+        await show_settings(query, user_id)
+    
+    elif query.data == 'settings_notifications':
+        if analytics:
+            analytics.log_user_action(user_id, 'toggle_notifications')
+        await toggle_notifications(query, user_id)
+    
+    elif query.data == 'settings_language':
+        if analytics:
+            analytics.log_user_action(user_id, 'change_language')
+        await query.edit_message_text(
+            "🌐 **Выбор языка**\n\n"
+            "В данный момент поддерживается только русский язык.\n"
+            "Поддержка других языков будет добавлена в будущих версиях.",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'feedback':
+        if analytics:
+            analytics.log_user_action(user_id, 'click_feedback')
+        await query.edit_message_text(
+            "💬 **Обратная связь**\n\n"
+            "Ваше мнение важно для нас! Помогите улучшить бота:",
+            parse_mode='Markdown',
+            reply_markup=feedback_menu()
+        )
+    
+    elif query.data == 'report_bug':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'reporting_bug')
+        await query.edit_message_text(
+            "🐛 **Сообщить об ошибке**\n\n"
+            "Опишите проблему, с которой вы столкнулись:\n"
+            "• Что вы делали?\n"
+            "• Что произошло?\n"
+            "• Что ожидали увидеть?\n\n"
+            "Напишите ваше сообщение в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'suggest_improvement':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'suggesting_improvement')
+        await query.edit_message_text(
+            "💡 **Предложить улучшение**\n\n"
+            "Поделитесь своими идеями по улучшению бота:\n"
+            "• Какие функции хотели бы добавить?\n"
+            "• Что можно улучшить?\n"
+            "• Какие проблемы заметили?\n\n"
+            "Напишите ваше предложение в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'rate_last_answer':
+        last_answer = state_manager.get_last_answer(user_id) if state_manager else None
+        if last_answer:
+            await query.edit_message_text(
+                "⭐ **Оцените качество ответа**\n\n"
+                "Насколько полезным был последний ответ?",
+                parse_mode='Markdown',
+                reply_markup=rating_keyboard()
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Нет ответа для оценки",
+                reply_markup=back_to_main_button()
+            )
+    
+    elif query.data.startswith('rate_'):
+        rating = int(query.data.split('_')[1])
+        last_answer = state_manager.get_last_answer(user_id) if state_manager else None
+        if last_answer and analytics:
+            analytics.log_question_rating(user_id, last_answer['question'], rating)
+            analytics.log_user_action(user_id, 'rate_answer', {'rating': rating})
+            
+            # Отправляем уведомление о низкой оценке
+            if admin_notifier and rating <= 2:
+                user_name = update.effective_user.first_name or "Пользователь"
+                await admin_notifier.send_low_rating_alert(
+                    user_id, user_name, rating, last_answer['question']
+                )
+            
+            await query.edit_message_text(
+                f"⭐ **Спасибо за оценку!**\n\n"
+                f"Вы поставили {rating} {'⭐' * rating}\n\n"
+                f"Ваша обратная связь поможет нам улучшить качество ответов.",
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+            
+            # Удаляем оцененный ответ
+            if state_manager:
+                state_manager.clear_last_answer(user_id)
+        else:
+            await query.edit_message_text(
+                "❌ Ошибка при сохранении оценки",
+                reply_markup=back_to_main_button()
+            )
+    
+    elif query.data == 'settings_stats':
+        await show_user_stats(query, user_id)
+    
+    elif query.data == 'export_history':
+        await export_user_history(query, user_id)
+    
+    elif query.data == 'documents_status':
+        await show_documents_status(query, user_id)
+    
+    elif query.data == 'reload_documents':
+        await reload_documents(query, user_id)
+    
+    else:
+        logging.warning(f"Неизвестная команда кнопки: {query.data} от пользователя {user_id}")
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик загруженных документов"""
     user_id = str(update.effective_user.id)
