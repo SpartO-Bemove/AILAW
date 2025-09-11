@@ -1,32 +1,50 @@
 from langchain_openai import ChatOpenAI
-from langchain.chains.llm import LLMChain
-from langchain.chains import ConversationalRetrievalChain
-from langchain.prompts.chat import ChatPromptTemplate
-from langchain_core.prompts import MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 def get_rag_chain(llm, vector_store, system_prompt, qa_prompt):
-    # Retriever
+    """
+    Создает современную RAG цепочку с поддержкой истории чата
+    """
+    # Создаем retriever
     retriever = vector_store.as_retriever(
         search_type="similarity_score_threshold",
         search_kwargs={"k": 10, "score_threshold": 0.3}
     )
-
-    # Create prompt template
-    qa_prompt_template = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", qa_prompt),
+    
+    # Промпт для создания контекстно-зависимого поиска
+    contextualize_q_system_prompt = """Given a chat history and the latest user question \
+which might reference context in the chat history, formulate a standalone question \
+which can be understood without the chat history. Do NOT answer the question, \
+just reformulate it if needed and otherwise return it as is."""
+    
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
     ])
     
-    # Create LLM chain
-    llm_chain = LLMChain(llm=llm, prompt=qa_prompt_template)
-
-    # Conversational Retrieval Chain
-    rag_chain = ConversationalRetrievalChain(
-        retriever=retriever,
-        question_generator=llm_chain,
-        combine_docs_chain=llm_chain,
-        return_source_documents=True
+    # Создаем history-aware retriever
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
     )
-
+    
+    # Промпт для ответа на вопрос
+    qa_system_prompt = system_prompt + "\n\n" + qa_prompt
+    
+    qa_prompt_template = ChatPromptTemplate.from_messages([
+        ("system", qa_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    
+    # Создаем цепочку для объединения документов
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt_template)
+    
+    # Создаем финальную RAG цепочку
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    
     return rag_chain

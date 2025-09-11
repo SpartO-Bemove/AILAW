@@ -93,9 +93,8 @@ class neuralex:
             logger.debug(f"Отправляем запрос в RAG цепочку для session_id: {session_id}")
             
             response = rag_chain.invoke(
-            {"input": query, "chat_history": messages},
-            config={"configurable": {"session_id": session_id}},
-        )
+                {"input": query, "chat_history": messages}
+            )
 
             answer = response['answer']
 
