@@ -103,6 +103,10 @@ class AdminHandlers:
         elif data == 'admin_detailed_stats':
             await self._show_detailed_analytics(query)
         
+        # Токены ИИ
+        elif data == 'admin_tokens':
+            await self._show_token_stats(query)
+        
         # Закрытие панели
         elif data == 'admin_close':
             await query.edit_message_text(

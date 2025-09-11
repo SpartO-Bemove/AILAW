@@ -33,10 +33,11 @@ class AdminPanel:
              InlineKeyboardButton("👥 Пользователи", callback_data='admin_users')],
             [InlineKeyboardButton("📄 Документы", callback_data='admin_documents'),
              InlineKeyboardButton("💬 Обратная связь", callback_data='admin_feedback')],
-            [InlineKeyboardButton("⚙️ Настройки бота", callback_data='admin_settings'),
-             InlineKeyboardButton("🔄 Обслуживание", callback_data='admin_maintenance')],
-            [InlineKeyboardButton("📈 Детальная аналитика", callback_data='admin_detailed_stats'),
+            [InlineKeyboardButton("🤖 Токены ИИ", callback_data='admin_tokens'),
+             InlineKeyboardButton("⚙️ Настройки бота", callback_data='admin_settings')],
+            [InlineKeyboardButton("🔄 Обслуживание", callback_data='admin_maintenance'),
              InlineKeyboardButton("🚨 Мониторинг", callback_data='admin_monitoring')],
+            [InlineKeyboardButton("📈 Детальная аналитика", callback_data='admin_detailed_stats')],
             [InlineKeyboardButton("❌ Закрыть панель", callback_data='admin_close')]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -90,7 +91,10 @@ class AdminPanel:
             'total_questions': 0,
             'total_documents_checked': 0,
             'average_rating': 0.0,
-            'error_rate': 0.0
+            'error_rate': 0.0,
+            'tokens_today': {},
+            'tokens_total': {},
+            'token_cost_today': {}
         }
         
         if not self.redis_client:
@@ -114,6 +118,11 @@ class AdminPanel:
             # Средний рейтинг
             if self.analytics:
                 stats['average_rating'] = self.analytics.get_average_rating()
+                
+                # Статистика токенов
+                stats['tokens_today'] = self.analytics.get_token_stats('today')
+                stats['tokens_total'] = self.analytics.get_token_stats('total')
+                stats['token_cost_today'] = self.analytics.get_token_cost_stats('today')
             
             # Количество пользователей (приблизительно)
             user_keys = self.redis_client.keys("user_stats:*")
@@ -211,6 +220,37 @@ class AdminPanel:
         message += f"• Всего действий: **{stats.get('total_actions', 0)}**\n"
         message += f"• Задано вопросов: **{stats.get('total_questions', 0)}**\n"
         message += f"• Проверено документов: **{stats.get('total_documents_checked', 0)}**\n\n"
+        
+        # Добавляем статистику токенов
+        tokens_today = stats.get('tokens_today', {})
+        tokens_total = stats.get('tokens_total', {})
+        token_cost = stats.get('token_cost_today', {})
+        
+        if tokens_today or tokens_total:
+            message += "🤖 **ИСПОЛЬЗОВАНИЕ ИИ:**\n"
+            
+            if period == "сегодня" and tokens_today:
+                message += f"• Токенов сегодня: **{tokens_today.get('total_tokens', 0):,}**\n"
+                message += f"  - Входящих: {tokens_today.get('prompt_tokens', 0):,}\n"
+                message += f"  - Исходящих: {tokens_today.get('completion_tokens', 0):,}\n"
+                message += f"• Запросов к ИИ: **{tokens_today.get('requests_count', 0)}**\n"
+                
+                if token_cost.get('total_cost_usd', 0) > 0:
+                    message += f"• Стоимость сегодня: **${token_cost['total_cost_usd']:.4f}**\n"
+                    message += f"• Средняя стоимость запроса: **${token_cost['avg_cost_per_request']:.4f}**\n"
+            
+            elif tokens_total:
+                message += f"• Всего токенов: **{tokens_total.get('total_tokens', 0):,}**\n"
+                message += f"• Всего запросов к ИИ: **{tokens_total.get('requests_count', 0)}**\n"
+                
+                if tokens_total.get('total_tokens', 0) > 0:
+                    total_cost = self.analytics.calculate_token_cost(
+                        tokens_total.get('prompt_tokens', 0),
+                        tokens_total.get('completion_tokens', 0)
+                    ) if self.analytics else 0
+                    message += f"• Общая стоимость: **${total_cost:.4f}**\n"
+            
+            message += "\n"
         
         message += "⭐ **КАЧЕСТВО:**\n"
         message += f"• Средний рейтинг: **{stats.get('average_rating', 0):.1f}/5.0**\n"

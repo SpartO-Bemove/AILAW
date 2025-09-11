@@ -40,6 +40,147 @@ class BotAnalytics:
         except Exception as e:
             logger.error(f"Ошибка при логировании действия: {e}")
     
+    def log_token_usage(self, user_id: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, model: str = "gpt-4o-mini"):
+        """Логирует использование токенов OpenAI"""
+        if not self.redis_client:
+            return
+            
+        try:
+            timestamp = datetime.now().isoformat()
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            token_data = {
+                'user_id': user_id,
+                'prompt_tokens': prompt_tokens,
+                'completion_tokens': completion_tokens,
+                'total_tokens': total_tokens,
+                'model': model,
+                'timestamp': timestamp
+            }
+            
+            # Сохраняем детальную информацию
+            key = f"tokens:detail:{user_id}:{timestamp}"
+            self.redis_client.setex(key, 30 * 24 * 3600, json.dumps(token_data))
+            
+            # Обновляем дневные счетчики
+            self.redis_client.hincrby(f"tokens:daily:{today}", "prompt_tokens", prompt_tokens)
+            self.redis_client.hincrby(f"tokens:daily:{today}", "completion_tokens", completion_tokens)
+            self.redis_client.hincrby(f"tokens:daily:{today}", "total_tokens", total_tokens)
+            self.redis_client.hincrby(f"tokens:daily:{today}", "requests_count", 1)
+            
+            # Обновляем пользовательские счетчики
+            self.redis_client.hincrby(f"tokens:user:{user_id}", "prompt_tokens", prompt_tokens)
+            self.redis_client.hincrby(f"tokens:user:{user_id}", "completion_tokens", completion_tokens)
+            self.redis_client.hincrby(f"tokens:user:{user_id}", "total_tokens", total_tokens)
+            self.redis_client.hincrby(f"tokens:user:{user_id}", "requests_count", 1)
+            
+            # Обновляем общие счетчики
+            self.redis_client.hincrby("tokens:total", "prompt_tokens", prompt_tokens)
+            self.redis_client.hincrby("tokens:total", "completion_tokens", completion_tokens)
+            self.redis_client.hincrby("tokens:total", "total_tokens", total_tokens)
+            self.redis_client.hincrby("tokens:total", "requests_count", 1)
+            
+            logger.debug(f"Токены записаны: {total_tokens} для пользователя {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при логировании токенов: {e}")
+    
+    def get_token_stats(self, period: str = "today") -> Dict:
+        """Получает статистику использования токенов"""
+        if not self.redis_client:
+            return {}
+            
+        try:
+            if period == "today":
+                today = datetime.now().strftime("%Y-%m-%d")
+                stats = self.redis_client.hgetall(f"tokens:daily:{today}")
+            elif period == "total":
+                stats = self.redis_client.hgetall("tokens:total")
+            else:
+                # Для других периодов можно добавить логику
+                stats = {}
+            
+            # Конвертируем в int
+            result = {}
+            for key, value in stats.items():
+                if isinstance(key, bytes):
+                    key = key.decode()
+                if isinstance(value, bytes):
+                    value = value.decode()
+                result[key] = int(value) if value.isdigit() else 0
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении статистики токенов: {e}")
+            return {}
+    
+    def get_user_token_stats(self, user_id: str) -> Dict:
+        """Получает статистику токенов для конкретного пользователя"""
+        if not self.redis_client:
+            return {}
+            
+        try:
+            stats = self.redis_client.hgetall(f"tokens:user:{user_id}")
+            result = {}
+            for key, value in stats.items():
+                if isinstance(key, bytes):
+                    key = key.decode()
+                if isinstance(value, bytes):
+                    value = value.decode()
+                result[key] = int(value) if value.isdigit() else 0
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении токенов пользователя {user_id}: {e}")
+            return {}
+    
+    def calculate_token_cost(self, prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:
+        """Рассчитывает стоимость токенов в USD"""
+        # Цены OpenAI на декабрь 2024 (за 1M токенов)
+        pricing = {
+            "gpt-4o-mini": {
+                "input": 0.15,   # $0.15 за 1M input токенов
+                "output": 0.60   # $0.60 за 1M output токенов
+            },
+            "gpt-4o": {
+                "input": 2.50,
+                "output": 10.00
+            },
+            "gpt-4": {
+                "input": 30.00,
+                "output": 60.00
+            }
+        }
+        
+        if model not in pricing:
+            model = "gpt-4o-mini"  # По умолчанию
+        
+        input_cost = (prompt_tokens / 1_000_000) * pricing[model]["input"]
+        output_cost = (completion_tokens / 1_000_000) * pricing[model]["output"]
+        
+        return input_cost + output_cost
+    
+    def get_token_cost_stats(self, period: str = "today") -> Dict:
+        """Получает статистику стоимости токенов"""
+        token_stats = self.get_token_stats(period)
+        
+        if not token_stats:
+            return {"total_cost_usd": 0.0, "requests_count": 0}
+        
+        prompt_tokens = token_stats.get("prompt_tokens", 0)
+        completion_tokens = token_stats.get("completion_tokens", 0)
+        requests_count = token_stats.get("requests_count", 0)
+        
+        total_cost = self.calculate_token_cost(prompt_tokens, completion_tokens)
+        
+        return {
+            "total_cost_usd": round(total_cost, 4),
+            "requests_count": requests_count,
+            "avg_cost_per_request": round(total_cost / max(requests_count, 1), 4)
+        }
+
     def _update_counters(self, user_id: str, action: str):
         """Обновляет счетчики действий"""
         try:

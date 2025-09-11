@@ -97,6 +97,33 @@ class neuralex:
             )
 
             answer = response['answer']
+            
+            # Логируем использование токенов если доступно
+            try:
+                # Пытаемся получить информацию о токенах из response
+                if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
+                    token_usage = response.response_metadata['token_usage']
+                    prompt_tokens = token_usage.get('prompt_tokens', 0)
+                    completion_tokens = token_usage.get('completion_tokens', 0)
+                    total_tokens = token_usage.get('total_tokens', 0)
+                    
+                    # Импортируем analytics здесь чтобы избежать циклических импортов
+                    try:
+                        import sys
+                        import os
+                        bot_path = os.path.join(os.path.dirname(__file__), '..', 'bot')
+                        if bot_path not in sys.path:
+                            sys.path.append(bot_path)
+                        
+                        from analytics import BotAnalytics
+                        if self.cache and self.cache.redis_client:
+                            analytics = BotAnalytics(self.cache.redis_client)
+                            analytics.log_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens)
+                    except Exception as analytics_error:
+                        logger.debug(f"Не удалось записать токены в аналитику: {analytics_error}")
+                        
+            except Exception as token_error:
+                logger.debug(f"Не удалось получить информацию о токенах: {token_error}")
 
             # Обновляем историю чата
             chat_history_obj.add_user_message(query)
