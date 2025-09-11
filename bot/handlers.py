@@ -183,8 +183,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await admin_handlers.admin_panel.handle_admin_command(update, context)
             return
         else:
-    global admin_handlers
-    
             await update.message.reply_text("❌ Админ-панель недоступна")
             return
     
@@ -347,7 +345,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 message_id=analyzing_message.message_id
             )
-        except Exception as e:
+        except Exception as delete_error:
             logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке анализа: {e}")
         
         logging.error(f"Ошибка при обработке документа для пользователя {user_id}: {e}")
@@ -487,7 +485,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
                 chat_id=update.effective_chat.id,
                 message_id=thinking_message.message_id
             )
-        except Exception as e:
+        except Exception as delete_error:
             logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке: {e}")
         
         # Специальная обработка ошибок OpenAI
@@ -538,7 +536,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
                 chat_id=update.effective_chat.id,
                 message_id=thinking_message.message_id
             )
-        except Exception as e:
+        except Exception as delete_error:
             logging.warning(f"Не удалось удалить промежуточное сообщение при ошибке: {e}")
         
         logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {e}")
