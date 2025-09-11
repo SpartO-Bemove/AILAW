@@ -12,7 +12,8 @@ def main_menu():
         [InlineKeyboardButton("⚙️ Настройки", callback_data='settings'),
          InlineKeyboardButton("💬 Обратная связь", callback_data='feedback')],
         [InlineKeyboardButton("ℹ️ О боте", callback_data='about'),
-         InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')]
+         InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')],
+        [InlineKeyboardButton("📚 Статус документов", callback_data='documents_status')]
     ]
     return InlineKeyboardMarkup(keyboard)
 

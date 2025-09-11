@@ -37,7 +37,7 @@ admin_notifier = None
 
 def initialize_components():
     """Инициализирует все компоненты системы"""
-    global law_assistant, analytics, user_manager, redis_manager, state_manager
+    global law_assistant, analytics, user_manager, redis_manager, state_manager, admin_notifier
     
     try:
         print("🔄 Инициализация компонентов бота...")
@@ -68,7 +68,7 @@ def initialize_components():
             raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
         
         print("🧠 Инициализация ИИ компонентов...")
-        from neuralex_main import neuralex
+        from neuralex_main.enhanced_neuralex import EnhancedNeuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         from langchain_community.vectorstores import Chroma
         import fitz  # PyMuPDF для работы с PDF
@@ -83,9 +83,20 @@ def initialize_components():
         vector_store = Chroma(persist_directory="chroma_db_legal_bot_part1", embedding_function=embeddings)
         print("✅ Vector store инициализирован")
         
-        # Создаем экземпляр neuralex
-        law_assistant = neuralex(llm, embeddings, vector_store, redis_url)
-        print("✅ Neuralex инициализирован")
+        # Создаем экземпляр enhanced neuralex с поддержкой дополнительных документов
+        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
+        print("✅ Enhanced Neuralex инициализирован")
+        
+        # Выводим информацию о загруженных документах
+        docs_info = law_assistant.get_documents_info()
+        if docs_info['additional_documents_loaded']:
+            stats = docs_info['stats']
+            print(f"📚 Дополнительные документы: {stats['total_files']} файлов")
+            for category, count in stats['categories'].items():
+                if count > 0:
+                    print(f"   • {category}: {count} файлов")
+        else:
+            print("📝 Дополнительные документы не найдены (используется базовая база)")
         
         logger.info("Все компоненты успешно инициализированы")
         print("🎉 Все компоненты успешно инициализированы!")
@@ -763,6 +774,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'export_history':
         await export_user_history(query, user_id)
     
+    elif query.data == 'documents_status':
+        await show_documents_status(query, user_id)
+    
+    elif query.data == 'reload_documents':
+        await reload_documents(query, user_id)
+    
     else:
         logging.warning(f"Неизвестная команда кнопки: {query.data} от пользователя {user_id}")
 
@@ -993,6 +1010,126 @@ async def export_user_history(query, user_id: str):
     else:
         await query.edit_message_text(
             "❌ Экспорт истории временно недоступен",
+            reply_markup=back_to_main_button()
+        )
+
+async def show_documents_status(query, user_id: str):
+    """Показывает статус загруженных документов"""
+    if law_assistant:
+        docs_info = law_assistant.get_documents_info()
+        stats = docs_info.get('stats', {})
+        
+        status_text = "📚 **Статус документов**\n\n"
+        
+        if docs_info['additional_documents_loaded']:
+            status_text += f"✅ **Дополнительные документы:** Загружены\n"
+            status_text += f"📊 **Всего файлов:** {stats.get('total_files', 0)}\n\n"
+            
+            categories_names = {
+                'laws': '⚖️ Федеральные законы',
+                'codes': '📖 Кодексы РФ',
+                'articles': '📝 Юридические статьи', 
+                'court_practice': '🏛️ Судебная практика'
+            }
+            
+            for category, count in stats.get('categories', {}).items():
+                name = categories_names.get(category, category)
+                status_text += f"{name}: **{count}** файлов\n"
+            
+            status_text += f"\n📋 **Поддерживаемые форматы:**\n"
+            formats = stats.get('supported_formats', [])
+            status_text += ", ".join(formats)
+            
+        else:
+            status_text += "📝 **Дополнительные документы:** Не найдены\n"
+            status_text += "💡 Добавьте файлы в папку `documents/` для расширения базы знаний\n\n"
+            status_text += "**Структура папок:**\n"
+            status_text += "• `documents/laws/` - Федеральные законы\n"
+            status_text += "• `documents/codes/` - Кодексы РФ\n"
+            status_text += "• `documents/articles/` - Юридические статьи\n"
+            status_text += "• `documents/court_practice/` - Судебная практика"
+        
+        if docs_info['base_vector_store_available']:
+            status_text += "\n\n✅ **Базовая векторная база:** Доступна"
+        else:
+            status_text += "\n\n❌ **Базовая векторная база:** Недоступна"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Перезагрузить документы", callback_data='reload_documents')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            status_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Информация о документах недоступна",
+            reply_markup=back_to_main_button()
+        )
+
+async def reload_documents(query, user_id: str):
+    """Перезагружает дополнительные документы"""
+    if law_assistant and hasattr(law_assistant, 'reload_documents'):
+        # Показываем индикатор загрузки
+        await query.edit_message_text(
+            "🔄 **Перезагрузка документов...**\n\n"
+            "📚 Сканирую папку documents/\n"
+            "🔍 Ищу новые файлы\n"
+            "⚡ Обновляю векторную базу\n"
+            "⏳ Это может занять несколько секунд",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            success = law_assistant.reload_documents()
+            
+            if success:
+                docs_info = law_assistant.get_documents_info()
+                stats = docs_info.get('stats', {})
+                
+                result_text = "✅ **Документы успешно перезагружены!**\n\n"
+                result_text += f"📊 **Всего файлов:** {stats.get('total_files', 0)}\n\n"
+                
+                categories_names = {
+                    'laws': '⚖️ Федеральные законы',
+                    'codes': '📖 Кодексы РФ', 
+                    'articles': '📝 Юридические статьи',
+                    'court_practice': '🏛️ Судебная практика'
+                }
+                
+                for category, count in stats.get('categories', {}).items():
+                    if count > 0:
+                        name = categories_names.get(category, category)
+                        result_text += f"{name}: **{count}** файлов\n"
+                
+                if analytics:
+                    analytics.log_user_action(user_id, 'reload_documents')
+                
+            else:
+                result_text = "❌ **Ошибка при перезагрузке документов**\n\n"
+                result_text += "Проверьте логи для получения подробной информации."
+            
+            await query.edit_message_text(
+                result_text,
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при перезагрузке документов: {e}")
+            await query.edit_message_text(
+                "❌ **Произошла ошибка при перезагрузке документов**\n\n"
+                "Попробуйте еще раз или обратитесь к администратору.",
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+    else:
+        await query.edit_message_text(
+            "❌ Функция перезагрузки документов недоступна",
             reply_markup=back_to_main_button()
         )
 
