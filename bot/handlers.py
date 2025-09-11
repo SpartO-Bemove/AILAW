@@ -4,8 +4,6 @@ import logging
 import json
 import tempfile
 import asyncio
-import fitz  # PyMuPDF для работы с PDF
-import docx  # python-docx для работы с Word
 from datetime import datetime
 
 # Добавляем путь к neuralex-main
@@ -73,6 +71,8 @@ def initialize_components():
         from neuralex_main import neuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         from langchain_community.vectorstores import Chroma
+        import fitz  # PyMuPDF для работы с PDF
+        import docx  # python-docx для работы с Word
         
         llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
         print("✅ LLM инициализирован")
@@ -103,43 +103,31 @@ initialize_components()
 
 def extract_text_from_file(file_path, file_extension):
     """Извлекает текст из различных типов файлов"""
-    logger.info(f"Извлечение текста из файла: {file_path}, расширение: {file_extension}")
-    
     try:
         if file_extension.lower() == '.pdf':
-            logger.info("Обработка PDF файла")
             doc = fitz.open(file_path)
             text = ""
             for page in doc:
                 text += page.get_text()
             doc.close()
-            logger.info(f"Извлечено {len(text)} символов из PDF")
             return text
         
         elif file_extension.lower() in ['.docx', '.doc']:
-            logger.info("Обработка DOCX/DOC файла")
             doc = docx.Document(file_path)
             text = ""
             for paragraph in doc.paragraphs:
                 text += paragraph.text + "\n"
-            logger.info(f"Извлечено {len(text)} символов из DOCX/DOC")
             return text
         
         elif file_extension.lower() == '.txt':
-            logger.info("Обработка TXT файла")
             with open(file_path, 'r', encoding='utf-8') as file:
-                text = file.read()
-            logger.info(f"Извлечено {len(text)} символов из TXT")
-            return text
+                return file.read()
         
         else:
-            logger.warning(f"Неподдерживаемый формат файла: {file_extension}")
+            logging.warning(f"Неподдерживаемый формат файла: {file_extension}")
             return None
-            
     except Exception as e:
-        logger.error(f"Ошибка при извлечении текста из {file_path}: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"Ошибка при извлечении текста: {e}")
         return None
 
 async def analyze_document(document_text, user_id):
@@ -260,31 +248,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Извлекаем текст из файла
         document_text = extract_text_from_file(temp_file_path, file_extension)
         
-        logger.info(f"Результат извлечения текста: {len(document_text) if document_text else 0} символов")
-        
         # Удаляем временный файл
         os.unlink(temp_file_path)
         
-        if not document_text:
+        if not document_text or len(document_text.strip()) < 50:
             await update.message.reply_text(
-                "❌ Не удалось извлечь текст из документа.\n\n"
-                "Возможные причины:\n"
-                "• Документ поврежден\n"
-                "• Документ защищен паролем\n"
-                "• Неподдерживаемый формат\n"
-                "• Документ содержит только изображения",
-                reply_markup=back_to_main_button()
-            )
-            if state_manager:
-                state_manager.clear_user_state(user_id)
-            return
-        
-        if len(document_text.strip()) < 10:
-            await update.message.reply_text(
-                f"❌ Документ слишком короткий для анализа.\n\n"
-                f"Извлечено символов: {len(document_text.strip())}\n"
-                f"Минимум требуется: 10 символов\n\n"
-                f"Убедитесь, что документ содержит текст.",
+                "❌ Не удалось извлечь текст из документа или документ слишком короткий.",
                 reply_markup=back_to_main_button()
             )
             if state_manager:
@@ -297,31 +266,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analysis_result = await analyze_document(document_text, user_id)
         
         # Форматируем ответ
-        formatted_response = f"""📄 АНАЛИЗ ДОКУМЕНТА
+        formatted_response = f"""📄 Анализ документа: {document.file_name}
 
-📎 Файл: {document.file_name}
-📊 Размер: {document.file_size / 1024:.1f} КБ
-📝 Формат: {file_extension.upper()}
-📏 Текст: {len(document_text)} символов
+📊 Размер файла: {document.file_size / 1024:.1f} КБ
+📝 Тип файла: {file_extension.upper()}
+📏 Длина текста: {len(document_text)} символов
+
+⚖️ Юридический анализ:
 
 {analysis_result}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ ВАЖНО: Данный анализ носит справочный характер. 
-Для окончательного заключения обратитесь к квалифицированному юристу."""
-
-        # Добавляем кнопки для дальнейших действий
-        keyboard = [
-            [InlineKeyboardButton("❓ Задать вопрос по документу", callback_data='ask_about_document')],
-            [InlineKeyboardButton("📄 Проверить еще документ", callback_data='check_document')],
-            [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+⚠️ Данный анализ носит справочный характер. Для окончательного заключения обратитесь к квалифицированному юристу."""
         
         await update.message.reply_text(
             formatted_response,
-            reply_markup=reply_markup
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
         )
         
         # Сбрасываем состояние пользователя
@@ -330,15 +290,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logging.error(f"Ошибка при обработке документа для пользователя {user_id}: {e}")
-        import traceback
-        traceback.print_exc()
         await update.message.reply_text(
-            f"❌ Произошла ошибка при обработке документа.\n\n"
-            f"Детали: {str(e)[:100]}...\n\n"
-            f"Попробуйте:\n"
-            f"• Другой формат файла\n"
-            f"• Меньший размер файла\n"
-            f"• Проверить, что файл не поврежден",
+            "❌ Произошла ошибка при обработке документа. Попробуйте еще раз.",
             reply_markup=main_menu()
         )
         if state_manager:
@@ -421,7 +374,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         
         # Форматируем ответ
         formatted_answer = f"🤖 NEURALEX | Юридическая консультация\n\n{answer}\n\n"
-        formatted_answer += "⚠️ Данная информация носит справочный характер. Для решения серьезных правовых вопросов обратитесь к квалифицированному юристу."
+        formatted_answer += "⚠️ Информация носит справочный характер. При серьезных вопросах обратитесь к юристу.\n\n"
+        formatted_answer += "💡 Был ли ответ полезен? Оцените его ниже!"
         
         # Сохраняем ответ для возможной оценки
         if state_manager:
@@ -429,7 +383,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         
         # Добавляем кнопку оценки
         keyboard = [
-            [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_last_answer')],
+            [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_last_answer'),
+             InlineKeyboardButton("❓ Задать еще вопрос", callback_data='ask')],
             [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -529,22 +484,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if analytics:
             analytics.log_user_action(user_id, 'click_check_document')
         await query.edit_message_text(
-            "📄 ПРОВЕРКА ДОКУМЕНТОВ\n\n"
+            "📄 **Проверка документов**\n\n"
             "Загрузите документ для анализа на соответствие российскому законодательству.\n\n"
-            "📋 ЧТО Я ПРОВЕРЮ:\n"
+            "📋 **Что я проверю:**\n"
             "• Соответствие формальным требованиям\n"
             "• Наличие обязательных реквизитов\n"
             "• Соответствие действующему законодательству\n"
             "• Выявление нарушений и несоответствий\n"
             "• Рекомендации по исправлению\n\n"
-            "📎 ПОДДЕРЖИВАЕМЫЕ ФОРМАТЫ:\n"
+            "📎 **Поддерживаемые форматы:**\n"
             "• PDF (.pdf)\n"
             "• Microsoft Word (.docx, .doc)\n"
             "• Текстовые файлы (.txt)\n\n"
-            "📏 ОГРАНИЧЕНИЯ:\n"
+            "📏 **Ограничения:**\n"
             "• Максимальный размер: 20 МБ\n"
             "• Документ должен содержать читаемый текст\n\n"
-            "📎 Прикрепите файл к следующему сообщению:",
+            "Прикрепите файл к следующему сообщению:",
+            parse_mode='Markdown',
             reply_markup=back_to_main_button()
         )
     
