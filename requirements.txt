@@ -15,6 +15,7 @@ langchainhub==0.1.20
 langsmith==0.1.93
 
 # Chroma vector database
+langchain-chroma==0.1.4
 chromadb==0.5.11
 chroma-hnswlib==0.7.6
 

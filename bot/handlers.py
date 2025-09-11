@@ -74,9 +74,9 @@ def initialize_components():
             raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
         
         print("🧠 Инициализация ИИ компонентов...")
-        from neuralex_main.enhanced_neuralex import EnhancedNeuralex
+        from enhanced_neuralex import EnhancedNeuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        from langchain_community.vectorstores import Chroma
+        from langchain_chroma import Chroma
         import fitz  # PyMuPDF для работы с PDF
         import docx  # python-docx для работы с Word
         

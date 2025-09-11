@@ -7,7 +7,7 @@ import time
 import threading
 from typing import List, Optional
 from langchain.schema import Document
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from .neuralex_main import neuralex
 from .document_loader import DocumentLoader
 
