@@ -22,6 +22,7 @@ from .rate_limiter import rate_limiter
 from .redis_manager import RedisManager
 from .state_manager import StateManager
 from .admin_notifier import AdminNotifier
+from .admin_handlers import AdminHandlers
 
 # Настройка логирования для handlers
 logging.basicConfig(level=logging.INFO)
@@ -34,10 +35,11 @@ user_manager = None
 redis_manager = None
 state_manager = None
 admin_notifier = None
+admin_handlers = None
 
 def initialize_components():
     """Инициализирует все компоненты системы"""
-    global law_assistant, analytics, user_manager, redis_manager, state_manager, admin_notifier
+    global law_assistant, analytics, user_manager, redis_manager, state_manager, admin_notifier, admin_handlers
     
     try:
         print("🔄 Инициализация компонентов бота...")
@@ -61,6 +63,10 @@ def initialize_components():
         analytics = BotAnalytics(redis_client)
         user_manager = UserManager(redis_client)
         print("✅ Analytics и UserManager инициализированы")
+        
+        # Инициализация админ-обработчиков
+        admin_handlers = AdminHandlers(redis_client)
+        print("✅ AdminHandlers инициализированы")
         
         # Инициализация neuralex компонентов
         openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -165,14 +171,30 @@ async def analyze_document(document_text, user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
-    global admin_notifier
+    global admin_notifier, admin_handlers
     
     # Инициализируем admin_notifier если еще не инициализирован
     if admin_notifier is None:
         admin_notifier = AdminNotifier(context.bot)
     
+    # Проверяем команду /admin
+    if update.message.text == '/admin':
+        if admin_handlers:
+            await admin_handlers.admin_panel.handle_admin_command(update, context)
+            return
+        else:
+    global admin_handlers
+    
+            await update.message.reply_text("❌ Админ-панель недоступна")
+            return
+    
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "Пользователь"
+    
+    # Проверяем админ-команды
+    if query.data.startswith('admin_') and admin_handlers:
+        await admin_handlers.handle_admin_callback(query, user_id)
+        return
     
     # Сбрасываем состояние пользователя при старте  
     if state_manager:

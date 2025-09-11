@@ -1,7 +1,7 @@
 import logging
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from .config import TOKEN
-from .handlers import start, button_handler, handle_user_message, handle_document
+from .handlers import start, button_handler, handle_user_message, handle_document, admin_handlers
 from .scheduler import scheduler
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ def main():
 
         # Добавляем обработчики
         app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("admin", start))  # /admin тоже обрабатывается через start
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
