@@ -5,13 +5,10 @@ def main_menu():
     keyboard = [
         [InlineKeyboardButton("❓ Задать вопрос", callback_data='ask'),
          InlineKeyboardButton("📄 Проверить документ", callback_data='check_document')],
-        [InlineKeyboardButton("🔍 Быстрый поиск", callback_data='quick_search'),
-         InlineKeyboardButton("💡 Примеры вопросов", callback_data='question_examples')],
-        [InlineKeyboardButton("📊 Популярные вопросы", callback_data='popular_questions'),
-         InlineKeyboardButton("💬 Обратная связь", callback_data='feedback')],
-        [InlineKeyboardButton("⚙️ Настройки", callback_data='settings'),
-         InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')],
-        [InlineKeyboardButton("📚 Статус документов", callback_data='documents_status')]
+        [InlineKeyboardButton("💬 Обратная связь", callback_data='feedback'),
+         InlineKeyboardButton("⚙️ Настройки", callback_data='settings')],
+        [InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history'),
+         InlineKeyboardButton("📚 Статус документов", callback_data='documents_status')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -52,30 +49,6 @@ def feedback_menu():
         [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_answer')],
         [InlineKeyboardButton("🐛 Сообщить об ошибке", callback_data='report_bug')],
         [InlineKeyboardButton("💡 Предложить улучшение", callback_data='suggest_improvement')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def quick_actions_menu():
-    """Меню быстрых действий"""
-    keyboard = [
-        [InlineKeyboardButton("⚡ Трудовые споры", callback_data='quick_labor')],
-        [InlineKeyboardButton("🏠 Жилищные вопросы", callback_data='quick_housing')],
-        [InlineKeyboardButton("👨‍👩‍👧‍👦 Семейное право", callback_data='quick_family')],
-        [InlineKeyboardButton("💰 Налоги и финансы", callback_data='quick_tax')],
-        [InlineKeyboardButton("🚗 ДТП и штрафы", callback_data='quick_traffic')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def question_examples_menu():
-    """Меню с примерами вопросов"""
-    keyboard = [
-        [InlineKeyboardButton("💼 Как уволиться правильно?", callback_data='example_quit')],
-        [InlineKeyboardButton("🏠 Права арендатора", callback_data='example_rent')],
-        [InlineKeyboardButton("👶 Алименты на ребенка", callback_data='example_alimony')],
-        [InlineKeyboardButton("🚗 Что делать при ДТП?", callback_data='example_accident')],
-        [InlineKeyboardButton("💰 Возврат товара в магазин", callback_data='example_return')],
         [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
     ]
     return InlineKeyboardMarkup(keyboard)

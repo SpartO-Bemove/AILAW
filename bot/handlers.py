@@ -523,37 +523,6 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(
             "❌ Произошла ошибка при обработке вашего запроса. Попробуйте еще раз.",
             reply_markup=main_menu()
-        )
-        if state_manager:
-            state_manager.clear_user_state(user_id)
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик нажатий на кнопки"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = str(update.effective_user.id)
-    user_name = update.effective_user.first_name or "Пользователь"
-    
-    logging.info(f"Пользователь {user_name} (ID: {user_id}) нажал кнопку: {query.data}")
-    
-    if query.data == 'ask':
-        if state_manager:
-            state_manager.set_user_state(user_id, 'asking_question')
-        if analytics:
-            analytics.log_user_action(user_id, 'click_ask')
-        await query.edit_message_text(
-            "❓ ЗАДАЙТЕ ЮРИДИЧЕСКИЙ ВОПРОС\n\n"
-            "Опишите вашу ситуацию подробно — я дам развернутый ответ со ссылками на законы.\n\n"
-            "💡 ПРИМЕРЫ ХОРОШИХ ВОПРОСОВ:\n\n"
-            "• Могут ли меня уволить во время больничного?\n"
-            "• Как вернуть деньги за некачественный товар?\n"
-            "• Какие документы нужны для развода?\n"
-            "• Что делать, если соседи шумят по ночам?\n\n"
-            "✍️ Напишите ваш вопрос следующим сообщением:",
-            reply_markup=back_to_main_button()
-        )
-    
     elif query.data == 'check_document':
         if state_manager:
             state_manager.set_user_state(user_id, 'checking_document')
