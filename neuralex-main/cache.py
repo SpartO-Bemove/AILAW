@@ -1,6 +1,9 @@
 import redis
 import hashlib
+import logging
 from langchain_community.chat_message_histories import RedisChatMessageHistory
+
+logger = logging.getLogger(__name__)
 
 class RedisCache:
     """
@@ -46,21 +49,40 @@ class RedisCache:
     """
     def __init__(self, redis_url):
         self.redis_url = redis_url
-        self.redis_client = redis.Redis.from_url(redis_url)
+        try:
+            self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+            # Проверяем соединение
+            self.redis_client.ping()
+            logger.info(f"Успешное подключение к Redis: {redis_url}")
+        except Exception as e:
+            logger.error(f"Ошибка подключения к Redis: {e}")
+            raise
 
     def make_cache_key(self, query, session_id):
         key_raw = f"{session_id}:{query}"
         return "llm_cache:" + hashlib.sha256(key_raw.encode()).hexdigest()
 
     def get(self, key):
-        value = self.redis_client.get(key)
-        return value.decode("utf-8") if value else None
+        try:
+            value = self.redis_client.get(key)
+            return value if value else None
+        except Exception as e:
+            logger.error(f"Ошибка при получении значения из кэша для ключа {key}: {e}")
+            return None
 
     def set(self, key: str, value: str, ttl: int = None) -> None:
-        if ttl is not None:
-            self.redis_client.setex(key, ttl, value)
-        else:
-            self.redis_client.set(key, value)
+        try:
+            if ttl is not None:
+                self.redis_client.setex(key, ttl, value)
+            else:
+                self.redis_client.set(key, value)
+            logger.debug(f"Значение сохранено в кэш для ключа: {key}")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении значения в кэш для ключа {key}: {e}")
 
     def get_chat_history(self, session_id):
-        return RedisChatMessageHistory(session_id=session_id, url=self.redis_url)
+        try:
+            return RedisChatMessageHistory(session_id=session_id, url=self.redis_url)
+        except Exception as e:
+            logger.error(f"Ошибка при создании истории чата для session_id {session_id}: {e}")
+            raise

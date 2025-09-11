@@ -16,6 +16,10 @@ def check_environment():
         'OPENAI_API_KEY'
     ]
     
+    optional_vars = [
+        'REDIS_URL'
+    ]
+    
     missing_vars = []
     for var in required_vars:
         if not os.getenv(var):
@@ -29,13 +33,25 @@ def check_environment():
         return False
     
     print("✅ Все переменные окружения настроены")
+    
+    # Проверяем опциональные переменные
+    for var in optional_vars:
+        if os.getenv(var):
+            print(f"✅ {var} настроен")
+        else:
+            print(f"⚠️  {var} не настроен (будет использовано значение по умолчанию)")
+    
     return True
 
 def check_chroma_db():
     """Проверяет наличие базы данных Chroma"""
     db_path = "chroma_db_legal_bot_part1"
     if os.path.exists(db_path):
-        print("✅ База данных Chroma найдена")
+        # Проверяем, что в директории есть файлы
+        if os.listdir(db_path):
+            print("✅ База данных Chroma найдена и содержит данные")
+        else:
+            print("⚠️  База данных Chroma найдена, но пуста")
         return True
     else:
         print("❌ База данных Chroma не найдена")
@@ -82,6 +98,20 @@ def check_imports():
     
     return True
 
+def check_redis_connection():
+    """Проверяет подключение к Redis"""
+    try:
+        import redis
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        client = redis.Redis.from_url(redis_url)
+        client.ping()
+        print("✅ Подключение к Redis успешно")
+        return True
+    except Exception as e:
+        print(f"⚠️  Не удалось подключиться к Redis: {e}")
+        print("   Бот будет работать без кэширования")
+        return True  # Не критично для работы бота
+
 def check_bot_structure():
     """Проверяет структуру файлов бота"""
     required_files = [
@@ -117,7 +147,8 @@ def main():
         check_bot_structure(),
         check_imports(),
         check_environment(),
-        check_chroma_db()
+        check_chroma_db(),
+        check_redis_connection()
     ]
     
     if all(checks):
@@ -126,6 +157,7 @@ def main():
         print("\n📝 Не забудьте:")
         print("   - Запустить Redis сервер (если используете кэширование)")
         print("   - Проверить токен бота в @BotFather")
+        print("   - Убедиться, что векторная база данных содержит данные")
     else:
         print("\n❌ Обнаружены проблемы. Исправьте их перед запуском бота.")
         sys.exit(1)

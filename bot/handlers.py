@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 
 # Добавляем путь к neuralex-main в sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
@@ -23,6 +24,10 @@ try:
     
     load_dotenv()
     
+    # Настройка логирования для handlers
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
     # Инициализация компонентов neuralex
     openai_api_key = os.getenv('OPENAI_API_KEY')
     if not openai_api_key:
@@ -35,8 +40,13 @@ try:
     # Создаем экземпляр neuralex
     law_assistant = neuralex(llm, embeddings, vector_store)
     
+    logger.info("Neuralex компоненты успешно инициализированы")
+    
 except ImportError as e:
-    print(f"Ошибка импорта neuralex: {e}")
+    logging.error(f"Ошибка импорта neuralex: {e}")
+    law_assistant = None
+except Exception as e:
+    logging.error(f"Ошибка инициализации neuralex: {e}")
     law_assistant = None
 
 # Словарь для отслеживания состояния пользователей
@@ -65,9 +75,10 @@ def extract_text_from_file(file_path, file_extension):
                 return file.read()
         
         else:
+            logging.warning(f"Неподдерживаемый формат файла: {file_extension}")
             return None
     except Exception as e:
-        print(f"Ошибка при извлечении текста: {e}")
+        logging.error(f"Ошибка при извлечении текста: {e}")
         return None
 
 async def analyze_document(document_text, user_id):
@@ -95,12 +106,19 @@ async def analyze_document(document_text, user_id):
         answer, _ = law_assistant.conversational(analysis_prompt, user_id)
         return answer
     except Exception as e:
-        print(f"Ошибка при анализе документа: {e}")
+        logging.error(f"Ошибка при анализе документа: {e}")
         return "❌ Произошла ошибка при анализе документа. Попробуйте позже."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "Пользователь"
+    
+    # Сбрасываем состояние пользователя при старте
+    user_states[user_id] = None
+    
+    logging.info(f"Пользователь {user_name} (ID: {user_id}) запустил бота")
+    
     welcome_text = f"""
 👋 Привет, {user_name}!
 
@@ -184,6 +202,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states[user_id] = None
             return
         
+        logging.info(f"Анализ документа для пользователя {user_id}: {document.file_name}")
+        
         # Анализируем документ
         analysis_result = await analyze_document(document_text, user_id)
         
@@ -210,7 +230,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states[user_id] = None
         
     except Exception as e:
-        print(f"Ошибка при обработке документа: {e}")
+        logging.error(f"Ошибка при обработке документа для пользователя {user_id}: {e}")
         await update.message.reply_text(
             "❌ Произошла ошибка при обработке документа. Попробуйте еще раз.",
             reply_markup=main_menu()
@@ -253,6 +273,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     # Показываем индикатор печати
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     
+    logging.info(f"Обработка вопроса от пользователя {user_id}: {user_text[:100]}...")
+    
     try:
         # Получаем ответ от ИИ-юриста
         answer, _ = law_assistant.conversational(user_text, user_id)
@@ -267,11 +289,13 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=back_to_main_button()
         )
         
+        logging.info(f"Успешно обработан вопрос пользователя {user_id}")
+        
         # Сбрасываем состояние пользователя
         user_states[user_id] = None
         
     except Exception as e:
-        print(f"Ошибка при обработке запроса: {e}")
+        logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {e}")
         await update.message.reply_text(
             "❌ Произошла ошибка при обработке вашего запроса. Попробуйте еще раз.",
             reply_markup=main_menu()
@@ -284,6 +308,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user_id = str(update.effective_user.id)
+    user_name = update.effective_user.first_name or "Пользователь"
+    
+    logging.info(f"Пользователь {user_name} (ID: {user_id}) нажал кнопку: {query.data}")
     
     if query.data == 'ask':
         user_states[user_id] = 'asking_question'
@@ -370,8 +397,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown',
                     reply_markup=back_to_main_button()
                 )
+                logging.info(f"История чата очищена для пользователя {user_id}")
             except Exception as e:
-                print(f"Ошибка при очистке истории: {e}")
+                logging.error(f"Ошибка при очистке истории для пользователя {user_id}: {e}")
                 await query.edit_message_text(
                     "❌ Произошла ошибка при очистке истории.",
                     reply_markup=back_to_main_button()
@@ -392,11 +420,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data == 'back_to_main':
         user_states[user_id] = None  # Сбрасываем состояние
-        user_name = update.effective_user.first_name or "Пользователь"
         await query.edit_message_text(
             f"👋 С возвращением, {user_name}!\n\nВыберите действие:",
             reply_markup=main_menu()
         )
+    
+    else:
+        logging.warning(f"Неизвестная команда кнопки: {query.data} от пользователя {user_id}")
 
 def get_law_info(law_code):
     """Возвращает информацию о выбранном законе"""

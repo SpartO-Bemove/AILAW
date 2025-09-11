@@ -1,15 +1,19 @@
 import threading
 import logging
+import time
 from .cache import RedisCache
 from langchain.schema import HumanMessage, AIMessage
 from .chains import get_rag_chain
 from .prompts import SYSTEM_PROMPT, QA_PROMPT
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
     handlers=[logging.StreamHandler()]
 )
+
+logger = logging.getLogger(__name__)
 
 class neuralex:
     """
@@ -44,15 +48,27 @@ class neuralex:
         self.llm = llm
         self.embeddings = embeddings
         self.vector_store = vector_store
-        self.cache = RedisCache(redis_url)
+        
+        try:
+            self.cache = RedisCache(redis_url)
+            logger.info(f"Redis кэш инициализирован: {redis_url}")
+        except Exception as e:
+            logger.error(f"Ошибка инициализации Redis кэша: {e}")
+            self.cache = None
 
     def get_session_history(self, session_id):
         with neuralex.store_lock:
             if session_id not in neuralex.store:
-                neuralex.store[session_id] = self.cache.get_chat_history(session_id)
-                logging.info(f"Created new chat history for session_id: {session_id}")
+                if self.cache:
+                    neuralex.store[session_id] = self.cache.get_chat_history(session_id)
+                    logger.info(f"Создана новая история чата для session_id: {session_id}")
+                else:
+                    # Fallback без Redis
+                    from langchain.memory import ChatMessageHistory
+                    neuralex.store[session_id] = ChatMessageHistory()
+                    logger.warning(f"Создана локальная история чата для session_id: {session_id} (Redis недоступен)")
             else:
-                logging.debug(f"Using existing chat history for session_id: {session_id}")
+                logger.debug(f"Используется существующая история чата для session_id: {session_id}")
         return neuralex.store[session_id]
 
     def conversational(self, query, session_id):
@@ -65,32 +81,55 @@ class neuralex:
         Returns:
             Tuple[str, list]: (LLM answer, updated message list)
         """
-        cache_key = self.cache.make_cache_key(query, session_id)
-        cached_answer = self.cache.get(cache_key)
-        if cached_answer:
-            logging.info(f"Cache hit for key: {cache_key}")
-            chat_history = self.get_session_history(session_id).messages
-            return cached_answer, chat_history
+        start_time = time.time()
+        
+        # Проверяем кэш только если он доступен
+        cached_answer = None
+        if self.cache:
+            try:
+                cache_key = self.cache.make_cache_key(query, session_id)
+                cached_answer = self.cache.get(cache_key)
+                if cached_answer:
+                    logger.info(f"Попадание в кэш для ключа: {cache_key}")
+                    chat_history = self.get_session_history(session_id).messages
+                    return cached_answer, chat_history
+            except Exception as e:
+                logger.error(f"Ошибка при работе с кэшем: {e}")
 
-        logging.info(f"Cache miss for key: {cache_key}. Generating new answer.")
+        logger.info(f"Промах кэша. Генерируем новый ответ для session_id: {session_id}")
 
-        rag_chain = get_rag_chain(self.llm, self.vector_store, SYSTEM_PROMPT, QA_PROMPT)
+        try:
+            rag_chain = get_rag_chain(self.llm, self.vector_store, SYSTEM_PROMPT, QA_PROMPT)
 
-        chat_history_obj = self.get_session_history(session_id)
-        messages = chat_history_obj.messages
+            chat_history_obj = self.get_session_history(session_id)
+            messages = chat_history_obj.messages
 
-        response = rag_chain.invoke(
+            logger.debug(f"Отправляем запрос в RAG цепочку для session_id: {session_id}")
+            
+            response = rag_chain.invoke(
             {"input": query, "chat_history": messages},
             config={"configurable": {"session_id": session_id}},
         )
 
-        answer = response['answer']
+            answer = response['answer']
 
-        # Update chat history
-        chat_history_obj.add_user_message(query)
-        chat_history_obj.add_ai_message(answer)
+            # Обновляем историю чата
+            chat_history_obj.add_user_message(query)
+            chat_history_obj.add_ai_message(answer)
 
-        # Cache the answer
-        self.cache.set(cache_key, answer)
+            # Кэшируем ответ, если кэш доступен
+            if self.cache:
+                try:
+                    self.cache.set(cache_key, answer)
+                    logger.debug(f"Ответ закэширован для ключа: {cache_key}")
+                except Exception as e:
+                    logger.error(f"Ошибка при кэшировании ответа: {e}")
 
-        return answer, chat_history_obj.messages
+            processing_time = time.time() - start_time
+            logger.info(f"Запрос обработан за {processing_time:.2f} секунд для session_id: {session_id}")
+            
+            return answer, chat_history_obj.messages
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке запроса для session_id {session_id}: {e}")
+            raise
