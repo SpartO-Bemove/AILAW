@@ -291,6 +291,12 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Максимальный размер: 20 МБ",
             reply_markup=back_to_main_button()
         )
+    elif current_state == 'reporting_bug':
+        # Обрабатываем сообщение об ошибке
+        await process_bug_report(update, context, user_text, user_id)
+    elif current_state == 'suggesting_improvement':
+        # Обрабатываем предложение по улучшению
+        await process_improvement_suggestion(update, context, user_text, user_id)
     else:
         await update.message.reply_text(
             "Пожалуйста, используйте кнопки для навигации.",
@@ -562,6 +568,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             analytics.log_user_action(user_id, 'click_settings')
         await show_settings(query, user_id)
     
+    elif query.data == 'settings_notifications':
+        if analytics:
+            analytics.log_user_action(user_id, 'toggle_notifications')
+        await toggle_notifications(query, user_id)
+    
+    elif query.data == 'settings_language':
+        if analytics:
+            analytics.log_user_action(user_id, 'change_language')
+        await query.edit_message_text(
+            "🌐 **Выбор языка**\n\n"
+            "В данный момент поддерживается только русский язык.\n"
+            "Поддержка других языков будет добавлена в будущих версиях.",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
     elif query.data == 'feedback':
         if analytics:
             analytics.log_user_action(user_id, 'click_feedback')
@@ -570,6 +592,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Ваше мнение важно для нас! Помогите улучшить бота:",
             parse_mode='Markdown',
             reply_markup=feedback_menu()
+        )
+    
+    elif query.data == 'report_bug':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'reporting_bug')
+        await query.edit_message_text(
+            "🐛 **Сообщить об ошибке**\n\n"
+            "Опишите проблему, с которой вы столкнулись:\n"
+            "• Что вы делали?\n"
+            "• Что произошло?\n"
+            "• Что ожидали увидеть?\n\n"
+            "Напишите ваше сообщение в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+    
+    elif query.data == 'suggest_improvement':
+        if state_manager:
+            state_manager.set_user_state(user_id, 'suggesting_improvement')
+        await query.edit_message_text(
+            "💡 **Предложить улучшение**\n\n"
+            "Поделитесь своими идеями по улучшению бота:\n"
+            "• Какие функции хотели бы добавить?\n"
+            "• Что можно улучшить?\n"
+            "• Какие проблемы заметили?\n\n"
+            "Напишите ваше предложение в следующем сообщении:",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
         )
     
     elif query.data == 'rate_last_answer':
@@ -849,3 +899,92 @@ async def export_user_history(query, user_id: str):
             "❌ Экспорт истории временно недоступен",
             reply_markup=back_to_main_button()
         )
+
+async def toggle_notifications(query, user_id: str):
+    """Переключает настройки уведомлений"""
+    if user_manager:
+        settings = user_manager.get_user_settings(user_id)
+        current_status = settings.get('notifications', True)
+        new_status = not current_status
+        
+        settings['notifications'] = new_status
+        user_manager.save_user_settings(user_id, settings)
+        
+        status_text = "включены" if new_status else "выключены"
+        await query.edit_message_text(
+            f"🔔 **Уведомления {status_text}**\n\n"
+            f"Настройка сохранена.",
+            parse_mode='Markdown',
+            reply_markup=settings_menu()
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Настройки временно недоступны",
+            reply_markup=back_to_main_button()
+        )
+
+async def process_bug_report(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str, user_id: str):
+    """Обрабатывает сообщение об ошибке"""
+    if analytics:
+        analytics.log_user_action(user_id, 'bug_report', {'report_length': len(user_text)})
+    
+    # Сохраняем отчет об ошибке
+    if user_manager and user_manager.redis_client:
+        try:
+            import json
+            bug_report = {
+                'user_id': user_id,
+                'report': user_text,
+                'timestamp': datetime.now().isoformat(),
+                'type': 'bug_report'
+            }
+            key = f"feedback:bug:{user_id}:{datetime.now().timestamp()}"
+            user_manager.redis_client.setex(key, 7 * 24 * 3600, json.dumps(bug_report))  # 7 дней
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении отчета об ошибке: {e}")
+    
+    await update.message.reply_text(
+        "✅ **Спасибо за отчет об ошибке!**\n\n"
+        "Ваше сообщение получено и будет рассмотрено разработчиками. "
+        "Мы работаем над улучшением бота и ценим вашу помощь!",
+        parse_mode='Markdown',
+        reply_markup=main_menu()
+    )
+    
+    if state_manager:
+        state_manager.clear_user_state(user_id)
+    
+    logger.info(f"Получен отчет об ошибке от пользователя {user_id}: {user_text[:100]}...")
+
+async def process_improvement_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str, user_id: str):
+    """Обрабатывает предложение по улучшению"""
+    if analytics:
+        analytics.log_user_action(user_id, 'improvement_suggestion', {'suggestion_length': len(user_text)})
+    
+    # Сохраняем предложение
+    if user_manager and user_manager.redis_client:
+        try:
+            import json
+            suggestion = {
+                'user_id': user_id,
+                'suggestion': user_text,
+                'timestamp': datetime.now().isoformat(),
+                'type': 'improvement_suggestion'
+            }
+            key = f"feedback:suggestion:{user_id}:{datetime.now().timestamp()}"
+            user_manager.redis_client.setex(key, 7 * 24 * 3600, json.dumps(suggestion))  # 7 дней
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении предложения: {e}")
+    
+    await update.message.reply_text(
+        "💡 **Спасибо за предложение!**\n\n"
+        "Ваша идея получена и будет рассмотрена командой разработки. "
+        "Лучшие предложения будут реализованы в будущих версиях бота!",
+        parse_mode='Markdown',
+        reply_markup=main_menu()
+    )
+    
+    if state_manager:
+        state_manager.clear_user_state(user_id)
+    
+    logger.info(f"Получено предложение от пользователя {user_id}: {user_text[:100]}...")
