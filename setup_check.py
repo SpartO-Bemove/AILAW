@@ -109,9 +109,10 @@ def check_files():
     
     if missing_files:
         if '.env' in missing_files:
-            print("\n💡 Создайте файл .env на основе .env.example:")
-            print("cp .env.example .env")
-            print("Затем отредактируйте .env и добавьте ваши токены")
+            print("\n💡 Файл .env отсутствует!")
+            print("Создайте файл .env и добавьте ваши токены:")
+            print("TELEGRAM_BOT_TOKEN=ваш_токен")
+            print("OPENAI_API_KEY=ваш_ключ")
         return False
     
     return True

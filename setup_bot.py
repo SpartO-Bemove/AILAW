@@ -29,7 +29,7 @@ def check_environment():
         print("❌ Отсутствуют следующие переменные окружения:")
         for var in missing_vars:
             print(f"   - {var}")
-        print("\nДобавьте их в файл .env")
+        print("\nОтредактируйте файл .env и добавьте реальные значения")
         return False
     
     print("✅ Все переменные окружения настроены")
