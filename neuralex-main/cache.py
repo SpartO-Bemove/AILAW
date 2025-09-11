@@ -10,8 +10,9 @@ class RedisCache:
     Кэш для LLM ответов и истории чатов с использованием Redis
     """
     
-    def __init__(self, redis_client=None):
+    def __init__(self, redis_client=None, redis_url=None):
         self.redis_client = redis_client
+        self.redis_url = redis_url
 
     def make_cache_key(self, query, session_id):
         key_raw = f"{session_id}:{query}"
@@ -45,7 +46,6 @@ class RedisCache:
             from langchain.memory import ChatMessageHistory
             return ChatMessageHistory()
         try:
-            return RedisChatMessageHistory(session_id=session_id, url=self.redis_url)
+            return RedisChatMessageHistory(session_id=session_id, url=self.redis_url or "redis://localhost:6379/0")
         except Exception as e:
             logger.error(f"Ошибка при создании истории чата для session_id {session_id}: {e}")
-            raise

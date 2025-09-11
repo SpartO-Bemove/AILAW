@@ -2,10 +2,10 @@ import threading
 import logging
 import time
 from openai import OpenAI
-from .cache import RedisCache
+from cache import RedisCache
 from langchain.schema import HumanMessage, AIMessage
-from .chains import get_rag_chain
-from .prompts import SYSTEM_PROMPT, QA_PROMPT
+from chains import get_rag_chain
+from prompts import SYSTEM_PROMPT, QA_PROMPT
 
 # Настройка логирования
 logging.basicConfig(
