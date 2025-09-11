@@ -3,7 +3,7 @@
 """
 import logging
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from .admin_panel import AdminPanel
 
@@ -545,3 +545,88 @@ class AdminHandlers:
             parse_mode='Markdown',
             reply_markup=self.admin_panel.get_admin_menu()
         )
+    
+    async def _show_token_stats(self, query):
+        """Показывает статистику использования токенов ИИ"""
+        try:
+            await query.answer("🤖 Загружаю статистику токенов...")
+            
+            if not self.admin_panel.analytics:
+                await query.edit_message_text(
+                    "❌ Аналитика недоступна",
+                    reply_markup=self.admin_panel.get_admin_menu()
+                )
+                return
+            
+            # Получаем статистику токенов
+            tokens_today = self.admin_panel.analytics.get_token_stats('today')
+            tokens_total = self.admin_panel.analytics.get_token_stats('total')
+            cost_today = self.admin_panel.analytics.get_token_cost_stats('today')
+            cost_total = self.admin_panel.analytics.get_token_cost_stats('total')
+            
+            message = "🤖 **СТАТИСТИКА ТОКЕНОВ ИИ**\n\n"
+            
+            # Статистика за сегодня
+            if tokens_today:
+                message += "📅 **СЕГОДНЯ:**\n"
+                message += f"• Всего токенов: **{tokens_today.get('total_tokens', 0):,}**\n"
+                message += f"• Входящие токены: **{tokens_today.get('prompt_tokens', 0):,}**\n"
+                message += f"• Исходящие токены: **{tokens_today.get('completion_tokens', 0):,}**\n"
+                message += f"• Запросов к ИИ: **{tokens_today.get('requests_count', 0)}**\n"
+                
+                if cost_today.get('total_cost_usd', 0) > 0:
+                    message += f"• Стоимость: **${cost_today['total_cost_usd']:.4f}**\n"
+                    message += f"• Средняя стоимость запроса: **${cost_today['avg_cost_per_request']:.4f}**\n"
+                
+                message += "\n"
+            else:
+                message += "📅 **СЕГОДНЯ:** Нет данных\n\n"
+            
+            # Общая статистика
+            if tokens_total:
+                message += "📊 **ВСЕГО:**\n"
+                message += f"• Всего токенов: **{tokens_total.get('total_tokens', 0):,}**\n"
+                message += f"• Входящие токены: **{tokens_total.get('prompt_tokens', 0):,}**\n"
+                message += f"• Исходящие токены: **{tokens_total.get('completion_tokens', 0):,}**\n"
+                message += f"• Всего запросов: **{tokens_total.get('requests_count', 0)}**\n"
+                
+                if tokens_total.get('total_tokens', 0) > 0:
+                    total_cost = self.admin_panel.analytics.calculate_token_cost(
+                        tokens_total.get('prompt_tokens', 0),
+                        tokens_total.get('completion_tokens', 0)
+                    )
+                    avg_tokens_per_request = tokens_total.get('total_tokens', 0) / max(tokens_total.get('requests_count', 1), 1)
+                    message += f"• Общая стоимость: **${total_cost:.4f}**\n"
+                    message += f"• Средний расход токенов: **{avg_tokens_per_request:.0f}** за запрос\n"
+                
+                message += "\n"
+            else:
+                message += "📊 **ВСЕГО:** Нет данных\n\n"
+            
+            # Информация о ценах
+            message += "💰 **ЦЕНЫ OPENAI (за 1M токенов):**\n"
+            message += "• GPT-4o-mini: $0.15 вход / $0.60 выход\n"
+            message += "• GPT-4o: $2.50 вход / $10.00 выход\n"
+            message += "• GPT-4: $30.00 вход / $60.00 выход\n\n"
+            
+            message += "ℹ️ *Статистика обновляется в реальном времени*"
+            
+            # Кнопки для навигации
+            keyboard = [
+                [InlineKeyboardButton("🔄 Обновить", callback_data='admin_tokens')],
+                [InlineKeyboardButton("🔙 Назад", callback_data='admin_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                message,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при показе статистики токенов: {e}")
+            await query.edit_message_text(
+                "❌ Ошибка при загрузке статистики токенов",
+                reply_markup=self.admin_panel.get_admin_menu()
+            )
