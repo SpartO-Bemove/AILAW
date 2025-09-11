@@ -43,7 +43,7 @@ class RedisCache:
     def get_chat_history(self, session_id):
         if not self.redis_client:
             # Fallback на локальную историю
-            from langchain.memory import ChatMessageHistory
+            from langchain_community.chat_message_histories import ChatMessageHistory
             return ChatMessageHistory()
         try:
             return RedisChatMessageHistory(session_id=session_id, url=self.redis_url or "redis://localhost:6379/0")
