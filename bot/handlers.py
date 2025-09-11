@@ -1,13 +1,16 @@
 import sys
 import os
 import logging
+import json
+import tempfile
+import asyncio
 from datetime import datetime
 
 # Добавляем путь к neuralex-main в sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralex-main'))
 
 from telegram import Update
-from telegram import Document
+from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from .keyboards import main_menu, laws_menu, back_to_main_button, settings_menu, feedback_menu, rating_keyboard
@@ -15,22 +18,24 @@ from .analytics import BotAnalytics
 from .user_manager import UserManager
 from .rate_limiter import rate_limiter
 
+# Настройка логирования для handlers
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Инициализация компонентов
+law_assistant = None
+analytics = None
+user_manager = None
+
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     from neuralex_main import neuralex
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from langchain_community.vectorstores import Chroma
-    import os
     import fitz  # PyMuPDF для работы с PDF
     import docx  # python-docx для работы с Word
-    import tempfile
-    import asyncio
-    from dotenv import load_dotenv
-    
-    load_dotenv()
-    
-    # Настройка логирования для handlers
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
     
     # Инициализация компонентов neuralex
     openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -47,9 +52,13 @@ try:
     # Инициализируем аналитику и менеджер пользователей
     try:
         import redis
-        redis_client = redis.Redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'), decode_responses=True)
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+        # Проверяем подключение
+        redis_client.ping()
         analytics = BotAnalytics(redis_client)
         user_manager = UserManager(redis_client)
+        logger.info("Redis подключен успешно")
     except Exception as e:
         logger.warning(f"Redis недоступен для аналитики: {e}")
         analytics = BotAnalytics()
@@ -57,12 +66,7 @@ try:
     
     logger.info("Neuralex компоненты успешно инициализированы")
     
-except ImportError as e:
-    logging.error(f"Ошибка импорта neuralex: {e}")
-    law_assistant = None
 except Exception as e:
-    logging.error(f"Ошибка инициализации neuralex: {e}")
-    law_assistant = None
 
 # Словарь для отслеживания состояния пользователей
 user_states = {}
@@ -332,7 +336,6 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         }
         
         # Добавляем кнопку оценки
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         keyboard = [
             [InlineKeyboardButton("⭐ Оценить ответ", callback_data='rate_last_answer')],
             [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]

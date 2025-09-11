@@ -49,6 +49,7 @@ class RedisCache:
     """
     def __init__(self, redis_url):
         self.redis_url = redis_url
+        self.redis_client = None
         try:
             self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
             # Проверяем соединение
@@ -56,13 +57,16 @@ class RedisCache:
             logger.info(f"Успешное подключение к Redis: {redis_url}")
         except Exception as e:
             logger.error(f"Ошибка подключения к Redis: {e}")
-            raise
+            # Не прерываем работу, просто отключаем кэширование
+            self.redis_client = None
 
     def make_cache_key(self, query, session_id):
         key_raw = f"{session_id}:{query}"
         return "llm_cache:" + hashlib.sha256(key_raw.encode()).hexdigest()
 
     def get(self, key):
+        if not self.redis_client:
+            return None
         try:
             value = self.redis_client.get(key)
             return value if value else None
@@ -71,6 +75,8 @@ class RedisCache:
             return None
 
     def set(self, key: str, value: str, ttl: int = None) -> None:
+        if not self.redis_client:
+            return
         try:
             if ttl is not None:
                 self.redis_client.setex(key, ttl, value)
@@ -81,6 +87,10 @@ class RedisCache:
             logger.error(f"Ошибка при сохранении значения в кэш для ключа {key}: {e}")
 
     def get_chat_history(self, session_id):
+        if not self.redis_client:
+            # Fallback на локальную историю
+            from langchain.memory import ChatMessageHistory
+            return ChatMessageHistory()
         try:
             return RedisChatMessageHistory(session_id=session_id, url=self.redis_url)
         except Exception as e:

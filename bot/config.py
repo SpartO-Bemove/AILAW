@@ -18,10 +18,10 @@ REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
 # Проверяем обязательные переменные
 if not TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN не найден в переменных окружения")
+    raise ValueError("TELEGRAM_BOT_TOKEN не найден в переменных окружения. Добавьте его в файл .env")
 
 if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
+    raise ValueError("OPENAI_API_KEY не найден в переменных окружения. Добавьте его в файл .env")
 
 # Настройки бота
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 МБ
