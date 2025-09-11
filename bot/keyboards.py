@@ -5,13 +5,11 @@ def main_menu():
     keyboard = [
         [InlineKeyboardButton("❓ Задать вопрос", callback_data='ask'),
          InlineKeyboardButton("📄 Проверить документ", callback_data='check_document')],
-        [InlineKeyboardButton("📚 Справочник законов", callback_data='laws'),
-         InlineKeyboardButton("🔍 Быстрый поиск", callback_data='quick_search')],
-        [InlineKeyboardButton("📊 Популярные вопросы", callback_data='popular_questions'),
+        [InlineKeyboardButton("🔍 Быстрый поиск", callback_data='quick_search'),
          InlineKeyboardButton("💡 Примеры вопросов", callback_data='question_examples')],
-        [InlineKeyboardButton("⚙️ Настройки", callback_data='settings'),
+        [InlineKeyboardButton("📊 Популярные вопросы", callback_data='popular_questions'),
          InlineKeyboardButton("💬 Обратная связь", callback_data='feedback')],
-        [InlineKeyboardButton("ℹ️ О боте", callback_data='about'),
+        [InlineKeyboardButton("⚙️ Настройки", callback_data='settings'),
          InlineKeyboardButton("🔄 Очистить историю", callback_data='clear_history')],
         [InlineKeyboardButton("📚 Статус документов", callback_data='documents_status')]
     ]
