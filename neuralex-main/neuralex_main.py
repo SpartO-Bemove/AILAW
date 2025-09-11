@@ -1,7 +1,6 @@
 import threading
 import logging
 import time
-import asyncio
 from openai import OpenAI
 from cache import RedisCache
 from langchain.schema import HumanMessage, AIMessage
@@ -29,10 +28,6 @@ class neuralex:
         self.embeddings = embeddings
         self.vector_store = vector_store
         
-        # Кэш для быстрых ответов
-        self.quick_answers_cache = {}
-        self.last_context_cache = {}
-        
         # Инициализируем кэш с внешним Redis клиентом
         redis_client = None
         if redis_url:
@@ -46,29 +41,6 @@ class neuralex:
                 redis_client = None
         
         self.cache = RedisCache(redis_client)
-
-    def is_simple_question(self, query):
-        """Определяет, является ли вопрос простым для быстрого ответа"""
-        simple_keywords = [
-            'что такое', 'кто такой', 'как называется', 'определение',
-            'сколько', 'когда', 'где', 'какой срок', 'какая статья'
-        ]
-        query_lower = query.lower()
-        return any(keyword in query_lower for keyword in simple_keywords)
-
-    def get_quick_context(self, query):
-        """Быстрый поиск контекста без сложной RAG цепочки"""
-        try:
-            # Простой similarity search без history-aware retriever
-            docs = self.vector_store.similarity_search(
-                query, 
-                k=3,  # Меньше документов = быстрее
-                score_threshold=0.4
-            )
-            return "\n".join([doc.page_content[:500] for doc in docs])  # Ограничиваем размер
-        except Exception as e:
-            logger.error(f"Ошибка быстрого поиска: {e}")
-            return ""
 
     def get_session_history(self, session_id):
         with neuralex.store_lock:
@@ -85,19 +57,15 @@ class neuralex:
                 logger.debug(f"Используется существующая история чата для session_id: {session_id}")
         return neuralex.store[session_id]
 
-    async def conversational_async(self, query, session_id):
-        """Асинхронная версия conversational для ускорения"""
-        return self.conversational(query, session_id)
-
-    def conversational(self, query, session_id, use_fast_mode=True):
+    def conversational(self, query, session_id):
         """
-        Обрабатывает запрос с оптимизацией скорости:
-        - Проверяет кэш
-        - Для простых вопросов использует быстрый режим
-        - Для сложных - полную RAG цепочку
+        Handles a query from a user within a session:
+        - Uses Redis-based history for retrieval.
+        - Returns cached response if available.
+        - Otherwise, runs full RAG pipeline and updates history.
 
         Returns:
-            Tuple[str, list]: (ответ ИИ, обновленная история)
+            Tuple[str, list]: (LLM answer, updated message list)
         """
         start_time = time.time()
         
@@ -116,53 +84,19 @@ class neuralex:
 
         logger.info(f"Промах кэша. Генерируем новый ответ для session_id: {session_id}")
 
-        # Определяем режим обработки
-        is_simple = self.is_simple_question(query) if use_fast_mode else False
-        
         try:
+            rag_chain = get_rag_chain(self.llm, self.vector_store, SYSTEM_PROMPT, QA_PROMPT)
+
             chat_history_obj = self.get_session_history(session_id)
             messages = chat_history_obj.messages
 
-            if is_simple and len(messages) < 4:  # Быстрый режим для простых вопросов
-                logger.info(f"Используем быстрый режим для session_id: {session_id}")
-                
-                # Быстрый поиск контекста
-                context = self.get_quick_context(query)
-                
-                # Простой промпт без сложной цепочки
-                simple_prompt = f"""
-{SYSTEM_PROMPT}
+            logger.debug(f"Отправляем запрос в RAG цепочку для session_id: {session_id}")
+            
+            response = rag_chain.invoke(
+                {"input": query, "chat_history": messages}
+            )
 
-Контекст: {context}
-
-Вопрос: {query}
-
-Дай краткий, но полный ответ на основе контекста. Используй структуру:
-
-🎯 **КРАТКИЙ ОТВЕТ:**
-[Основная суть в 1-2 предложениях]
-
-📋 **ПОДРОБНО:**
-[Развернутое объяснение]
-
-⚖️ **ПРАВОВАЯ БАЗА:**
-[Конкретные статьи и законы если есть в контексте]
-"""
-                
-                # Прямой вызов LLM без RAG цепочки
-                response = self.llm.invoke([HumanMessage(content=simple_prompt)])
-                answer = response.content
-                
-            else:  # Полная RAG цепочка для сложных вопросов
-                logger.info(f"Используем полную RAG цепочку для session_id: {session_id}")
-                rag_chain = get_rag_chain(self.llm, self.vector_store, SYSTEM_PROMPT, QA_PROMPT)
-                
-                response = rag_chain.invoke(
-                    {"input": query, "chat_history": messages}
-                )
-                answer = response['answer']
-
-            logger.debug(f"Ответ получен для session_id: {session_id}")
+            answer = response['answer']
 
             # Обновляем историю чата
             chat_history_obj.add_user_message(query)

@@ -407,9 +407,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     
     try:
         # Получаем ответ от ИИ-юриста
-        # Используем быстрый режим для коротких вопросов
-        use_fast_mode = len(user_text) < 100 and len(user_text.split()) < 15
-        answer, _ = law_assistant.conversational(user_text, user_id, use_fast_mode=use_fast_mode)
+        answer, _ = law_assistant.conversational(user_text, user_id)
         
         # Форматируем ответ
         formatted_answer = f"🤖 **NEURALEX | Юридическая консультация**\n\n{answer}\n\n"
