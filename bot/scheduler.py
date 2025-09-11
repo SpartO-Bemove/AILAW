@@ -11,6 +11,9 @@ import redis
 
 logger = logging.getLogger(__name__)
 
+# Импортируем admin_notifier для отправки статистики
+admin_notifier = None
+
 class BotScheduler:
     """Планировщик для выполнения периодических задач"""
     
@@ -88,6 +91,8 @@ class BotScheduler:
     
     def _update_statistics(self):
         """Обновляет статистику"""
+        global admin_notifier
+        
         if not self.redis_client:
             return
             
@@ -96,7 +101,18 @@ class BotScheduler:
             current_hour = datetime.now().strftime("%Y-%m-%d-%H")
             active_users_key = f"active_users:{current_hour}"
             
-            # Здесь можно добавить логику подсчета активных пользователей
+            # Отправляем ежедневную статистику в полночь
+            if datetime.now().hour == 0 and admin_notifier:
+                from .analytics import BotAnalytics
+                analytics = BotAnalytics(self.redis_client)
+                today = datetime.now().strftime("%Y-%m-%d")
+                daily_stats = analytics.get_daily_stats(today)
+                daily_stats['avg_rating'] = analytics.get_average_rating()
+                
+                # Отправляем статистику администратору
+                import asyncio
+                asyncio.create_task(admin_notifier.send_daily_stats(daily_stats))
+            
             logger.info("Статистика обновлена")
             
         except Exception as e:

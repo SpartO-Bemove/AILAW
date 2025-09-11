@@ -21,6 +21,7 @@ from .user_manager import UserManager
 from .rate_limiter import rate_limiter
 from .redis_manager import RedisManager
 from .state_manager import StateManager
+from .admin_notifier import AdminNotifier
 
 # Настройка логирования для handlers
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +33,7 @@ analytics = None
 user_manager = None
 redis_manager = None
 state_manager = None
+admin_notifier = None
 
 def initialize_components():
     """Инициализирует все компоненты системы"""
@@ -48,6 +50,8 @@ def initialize_components():
         
         # Инициализация менеджера состояний
         state_manager = StateManager(redis_client)
+        
+        # Инициализация уведомлений администратора (будет инициализирован позже с bot instance)
         
         # Инициализация аналитики и менеджера пользователей
         analytics = BotAnalytics(redis_client)
@@ -134,6 +138,12 @@ async def analyze_document(document_text, user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    global admin_notifier
+    
+    # Инициализируем admin_notifier если еще не инициализирован
+    if admin_notifier is None:
+        admin_notifier = AdminNotifier(context.bot)
+    
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "Пользователь"
     
@@ -644,6 +654,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             analytics.log_question_rating(user_id, last_answer['question'], rating)
             analytics.log_user_action(user_id, 'rate_answer', {'rating': rating})
             
+            # Отправляем уведомление о низкой оценке
+            if admin_notifier and rating <= 2:
+                user_name = update.effective_user.first_name or "Пользователь"
+                await admin_notifier.send_low_rating_alert(
+                    user_id, user_name, rating, last_answer['question']
+                )
+            
             await query.edit_message_text(
                 f"✅ **Спасибо за оценку!**\n\n"
                 f"Вы поставили {rating} {'⭐' * rating}\n\n"
@@ -940,6 +957,12 @@ async def process_bug_report(update: Update, context: ContextTypes.DEFAULT_TYPE,
             }
             key = f"feedback:bug:{user_id}:{datetime.now().timestamp()}"
             user_manager.redis_client.setex(key, 7 * 24 * 3600, json.dumps(bug_report))  # 7 дней
+            
+            # Отправляем уведомление администратору
+            if admin_notifier:
+                user_name = update.effective_user.first_name or "Пользователь"
+                await admin_notifier.send_bug_report(user_id, user_name, user_text)
+                
         except Exception as e:
             logger.error(f"Ошибка при сохранении отчета об ошибке: {e}")
     
@@ -973,6 +996,12 @@ async def process_improvement_suggestion(update: Update, context: ContextTypes.D
             }
             key = f"feedback:suggestion:{user_id}:{datetime.now().timestamp()}"
             user_manager.redis_client.setex(key, 7 * 24 * 3600, json.dumps(suggestion))  # 7 дней
+            
+            # Отправляем уведомление администратору
+            if admin_notifier:
+                user_name = update.effective_user.first_name or "Пользователь"
+                await admin_notifier.send_improvement_suggestion(user_id, user_name, user_text)
+                
         except Exception as e:
             logger.error(f"Ошибка при сохранении предложения: {e}")
     
