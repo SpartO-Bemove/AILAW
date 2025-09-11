@@ -12,7 +12,7 @@ def create_chroma_db():
     
     try:
         from langchain_openai import OpenAIEmbeddings
-        from langchain_chroma import Chroma
+        from langchain_community.vectorstores import Chroma
         
         openai_api_key = os.getenv('OPENAI_API_KEY')
         if not openai_api_key:

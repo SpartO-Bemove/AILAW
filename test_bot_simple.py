@@ -53,7 +53,7 @@ async def test_neuralex_direct():
         
         from neuralex_main import neuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        from langchain_chroma import Chroma
+        from langchain_community.vectorstores import Chroma
         
         openai_api_key = os.getenv('OPENAI_API_KEY')
         

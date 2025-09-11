@@ -76,7 +76,7 @@ def initialize_components():
         print("🧠 Инициализация ИИ компонентов...")
         from enhanced_neuralex import EnhancedNeuralex
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        from langchain_chroma import Chroma
+        from langchain_community.vectorstores import Chroma
         import fitz  # PyMuPDF для работы с PDF
         import docx  # python-docx для работы с Word
         
