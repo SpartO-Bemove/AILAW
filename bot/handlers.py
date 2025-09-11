@@ -266,13 +266,13 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analysis_result = await analyze_document(document_text, user_id)
         
         # Форматируем ответ
-        formatted_response = f"""📄 Анализ документа: {document.file_name}
+        formatted_response = f"""📄 **Анализ документа:** {document.file_name}
 
-📊 Размер файла: {document.file_size / 1024:.1f} КБ
-📝 Тип файла: {file_extension.upper()}
-📏 Длина текста: {len(document_text)} символов
+📊 **Размер файла:** {document.file_size / 1024:.1f} КБ
+📝 **Тип файла:** {file_extension.upper()}
+📏 **Длина текста:** {len(document_text)} символов
 
-⚖️ Юридический анализ:
+⚖️ **Юридический анализ:**
 
 {analysis_result}
 
@@ -373,7 +373,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         answer, _ = law_assistant.conversational(user_text, user_id)
         
         # Форматируем ответ
-        formatted_answer = f"🤖 NEURALEX | Юридическая консультация\n\n{answer}\n\n"
+        formatted_answer = f"🤖 **NEURALEX | Юридическая консультация**\n\n{answer}\n\n"
         formatted_answer += "⚠️ Информация носит справочный характер. При серьезных вопросах обратитесь к юристу.\n\n"
         formatted_answer += "💡 Был ли ответ полезен? Оцените его ниже!"
         
@@ -391,7 +391,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         
         await update.message.reply_text(
             formatted_answer,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
         
         logging.info(f"Успешно обработан вопрос пользователя {user_id}")
