@@ -25,10 +25,17 @@ def main():
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
         print("✅ Обработчики добавлены")
 
+        # Проверяем, что law_assistant инициализирован
+        from .handlers import law_assistant
+        if law_assistant:
+            print("✅ Law assistant готов к работе")
+        else:
+            print("⚠️  Law assistant не инициализирован - бот будет работать с ограничениями")
+
         logger.info("🤖 Neuralex бот запущен и готов к работе!")
         print("🤖 Neuralex бот запущен и готов к работе!")
         print("📱 Для остановки нажмите Ctrl+C")
-        print("🔍 Если бот не отвечает, запустите: python diagnose_bot.py")
+        print("🔍 Если проблемы, запустите: python test_bot_simple.py")
         
         app.run_polling()
         

@@ -371,23 +371,8 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     logging.info(f"Обработка вопроса от пользователя {user_id}: {user_text[:100]}...")
     
     try:
-        # Дополнительная проверка law_assistant
-        if law_assistant is None:
-            logging.error("law_assistant is None при обработке вопроса")
-            await update.message.reply_text(
-                "❌ Сервис ИИ-консультаций не инициализирован.\n\n"
-                "Попробуйте перезапустить бота или обратитесь к администратору.",
-                parse_mode='Markdown',
-                reply_markup=main_menu()
-            )
-            if state_manager:
-                state_manager.clear_user_state(user_id)
-            return
-        
         # Получаем ответ от ИИ-юриста
-        logging.info(f"Отправляем запрос в law_assistant для пользователя {user_id}")
         answer, _ = law_assistant.conversational(user_text, user_id)
-        logging.info(f"Получен ответ от law_assistant: {len(answer)} символов")
         
         # Форматируем ответ
         formatted_answer = f"⚖️ **Юридическая консультация:**\n\n{answer}\n\n"
@@ -419,6 +404,7 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as openai_error:
         # Специальная обработка ошибок OpenAI
         error_message = str(openai_error).lower()
+        logging.error(f"Ошибка при обработке запроса пользователя {user_id}: {openai_error}")
         
         if "rate limit" in error_message or "quota" in error_message:
             await update.message.reply_text(
@@ -439,8 +425,9 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
         elif "insufficient_quota" in error_message:
             await update.message.reply_text(
                 "💳 **Исчерпан лимит OpenAI**\n\n"
-                "Закончились кредиты на аккаунте OpenAI. "
-                "Обратитесь к администратору.",
+                "Закончились кредиты на аккаунте OpenAI.\n\n"
+                "Проверьте баланс на https://platform.openai.com/account/billing\n"
+                "Если баланс пополнен, попробуйте через несколько минут.",
                 parse_mode='Markdown',
                 reply_markup=main_menu()
             )
@@ -448,12 +435,11 @@ async def process_legal_question(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text(
                 "❌ Произошла ошибка при обработке вашего запроса.\n\n"
                 f"Детали: {str(openai_error)[:100]}...\n\n"
-                "Попробуйте еще раз или обратитесь к администратору.",
+                "Попробуйте еще раз через несколько минут.",
                 parse_mode='Markdown',
                 reply_markup=main_menu()
             )
         
-        logging.error(f"OpenAI ошибка для пользователя {user_id}: {openai_error}")
         if state_manager:
             state_manager.clear_user_state(user_id)
         
