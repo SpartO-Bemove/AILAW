@@ -52,6 +52,7 @@ try:
     from neuralex_main import neuralex
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from langchain_community.vectorstores import Chroma
+    from prompts import DOCUMENT_ANALYSIS_PROMPT
     import fitz  # PyMuPDF для работы с PDF
     import docx  # python-docx для работы с Word
     
@@ -125,21 +126,13 @@ async def analyze_document(document_text, user_id):
     if law_assistant is None:
         return "❌ Сервис анализа документов временно недоступен."
     
-    analysis_prompt = f"""
-Проанализируй следующий документ на соответствие российскому законодательству:
-
-ДОКУМЕНТ:
-{document_text[:4000]}  # Ограничиваем размер для анализа
-
-Проведи анализ по следующим критериям:
-1. Соответствие формальным требованиям
-2. Наличие обязательных реквизитов
-3. Соответствие действующему законодательству
-4. Выявленные нарушения или несоответствия
-5. Рекомендации по исправлению
-
-Дай краткое заключение о юридической корректности документа.
-"""
+    # Ограничиваем размер документа для анализа (4000 символов)
+    truncated_text = document_text[:4000]
+    if len(document_text) > 4000:
+        truncated_text += "\n\n[Документ обрезан для анализа...]"
+    
+    # Используем промпт из prompts.py
+    analysis_prompt = DOCUMENT_ANALYSIS_PROMPT.format(document_text=truncated_text)
     
     try:
         answer, _ = law_assistant.conversational(analysis_prompt, user_id)
