@@ -31,6 +31,13 @@ class EnhancedNeuralex(neuralex):
         try:
             logger.info("🔄 Проверка дополнительных документов...")
             
+            # Проверяем, нужно ли перезагружать документы
+            if self._should_skip_loading():
+                logger.info("⚡ Документы уже загружены, пропускаем векторизацию")
+                self.additional_documents_loaded = True
+                self.documents_stats = self.document_loader.get_documents_stats()
+                return
+            
             # Загружаем документы
             additional_docs = self.document_loader.load_all_documents()
             
@@ -44,6 +51,9 @@ class EnhancedNeuralex(neuralex):
                 # Сохраняем статистику
                 self.documents_stats = self.document_loader.get_documents_stats()
                 
+                # Сохраняем метку о загрузке
+                self._save_loading_marker()
+                
                 logger.info("✅ Дополнительные документы успешно загружены")
             else:
                 logger.info("📝 Дополнительные документы не найдены")
@@ -52,6 +62,54 @@ class EnhancedNeuralex(neuralex):
         except Exception as e:
             logger.error(f"❌ Ошибка при загрузке дополнительных документов: {e}")
             # Не прерываем работу, продолжаем с базовой функциональностью
+    
+    def _should_skip_loading(self) -> bool:
+        """Проверяет, нужно ли пропустить загрузку документов"""
+        try:
+            import os
+            import json
+            
+            marker_file = "documents/.loaded_marker"
+            if not os.path.exists(marker_file):
+                return False
+            
+            # Читаем информацию о последней загрузке
+            with open(marker_file, 'r') as f:
+                marker_data = json.load(f)
+            
+            # Проверяем, изменились ли файлы
+            current_stats = self.document_loader.get_documents_stats()
+            if marker_data.get('stats') != current_stats:
+                return False
+            
+            # Проверяем, существует ли векторная база
+            if not self.vector_store or not hasattr(self.vector_store, '_collection'):
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Ошибка при проверке маркера загрузки: {e}")
+            return False
+    
+    def _save_loading_marker(self):
+        """Сохраняет маркер о завершенной загрузке"""
+        try:
+            import os
+            import json
+            from datetime import datetime
+            
+            marker_data = {
+                'loaded_at': datetime.now().isoformat(),
+                'stats': self.documents_stats
+            }
+            
+            os.makedirs("documents", exist_ok=True)
+            with open("documents/.loaded_marker", 'w') as f:
+                json.dump(marker_data, f, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении маркера загрузки: {e}")
     
     def _add_documents_to_vector_store(self, documents: List[Document]):
         """Добавляет документы в векторную базу"""
