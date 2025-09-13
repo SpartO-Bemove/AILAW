@@ -1,4 +1,5 @@
 import sys
+import json
 import os
 import logging
 import json
@@ -13,6 +14,7 @@ neuralex_path = os.path.join(os.path.dirname(__file__), '..', 'neuralex-main')
 if neuralex_path not in sys.path:
     sys.path.append(neuralex_path)
 
+# Импортируем enhanced версию вместо базовой
 from enhanced_neuralex import EnhancedNeuralex
 from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -105,7 +107,7 @@ def initialize_components():
                     print(f"   • {category}: {count} файлов")
         else:
             print("📝 Дополнительные документы не найдены (используется базовая база)")
-        
+        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
         logger.info("Все компоненты успешно инициализированы")
         print("🎉 Все компоненты успешно инициализированы!")
         return True
@@ -1137,18 +1139,7 @@ async def show_documents_status(query, user_id: str):
             status_text += "\n\n✅ **Базовая векторная база:** Доступна"
         else:
             status_text += "\n\n❌ **Базовая векторная база:** Недоступна"
-        
-        keyboard = [
-            [InlineKeyboardButton("🔄 Перезагрузить документы", callback_data='reload_documents')],
-            [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            status_text,
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        await handle_rating(query, data)
     else:
         await query.edit_message_text(
             "❌ Информация о документах недоступна",
