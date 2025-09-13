@@ -17,6 +17,7 @@ if neuralex_path not in sys.path:
 # Импортируем enhanced версию вместо базовой
 from enhanced_neuralex import EnhancedNeuralex
 from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from .keyboards import main_menu, laws_menu, back_to_main_button, settings_menu, feedback_menu, rating_keyboard
