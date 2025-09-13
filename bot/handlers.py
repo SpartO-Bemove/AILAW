@@ -5,7 +5,7 @@ import logging
 import json
 import tempfile
 import asyncio
-import fitz  # PyMuPDF
+from .config import TOKEN, OPENAI_API_KEY, CHROMA_DB_PATH, MAX_FILE_SIZE, ALLOWED_EXTENSIONS, REDIS_URL
 import docx  # python-docx
 from datetime import datetime
 
