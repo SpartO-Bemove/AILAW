@@ -6,8 +6,22 @@ import os
 import hashlib
 from typing import List, Dict, Optional
 from pathlib import Path
-import fitz  # PyMuPDF
-import docx
+
+# Импорты для обработки документов
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+    logger.warning("PyMuPDF не установлен, PDF файлы не будут обрабатываться")
+
+try:
+    import docx
+    PYTHON_DOCX_AVAILABLE = True
+except ImportError:
+    PYTHON_DOCX_AVAILABLE = False
+    logger.warning("python-docx не установлен, DOCX файлы не будут обрабатываться")
+
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
@@ -18,7 +32,14 @@ class DocumentLoader:
     
     def __init__(self, documents_path: str = "documents"):
         self.documents_path = Path(documents_path)
-        self.supported_extensions = {'.txt', '.md', '.pdf', '.docx'}
+        
+        # Определяем поддерживаемые форматы на основе доступных библиотек
+        self.supported_extensions = {'.txt', '.md'}
+        if PYMUPDF_AVAILABLE:
+            self.supported_extensions.add('.pdf')
+        if PYTHON_DOCX_AVAILABLE:
+            self.supported_extensions.add('.docx')
+            
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -53,19 +74,35 @@ class DocumentLoader:
                     return f.read()
             
             elif extension == '.pdf':
-                doc = fitz.open(file_path)
-                text = ""
-                for page in doc:
-                    text += page.get_text()
-                doc.close()
-                return text
+                if not PYMUPDF_AVAILABLE:
+                    logger.warning(f"PyMuPDF не доступен, пропускаем PDF файл: {file_path}")
+                    return None
+                
+                try:
+                    doc = fitz.open(file_path)
+                    text = ""
+                    for page in doc:
+                        text += page.get_text()
+                    doc.close()
+                    return text
+                except Exception as e:
+                    logger.error(f"Ошибка при чтении PDF {file_path}: {e}")
+                    return None
             
             elif extension == '.docx':
-                doc = docx.Document(file_path)
-                text = ""
-                for paragraph in doc.paragraphs:
-                    text += paragraph.text + "\n"
-                return text
+                if not PYTHON_DOCX_AVAILABLE:
+                    logger.warning(f"python-docx не доступен, пропускаем DOCX файл: {file_path}")
+                    return None
+                
+                try:
+                    doc = docx.Document(file_path)
+                    text = ""
+                    for paragraph in doc.paragraphs:
+                        text += paragraph.text + "\n"
+                    return text
+                except Exception as e:
+                    logger.error(f"Ошибка при чтении DOCX {file_path}: {e}")
+                    return None
             
             else:
                 logger.warning(f"Неподдерживаемый формат файла: {extension}")
