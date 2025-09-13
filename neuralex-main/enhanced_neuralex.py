@@ -10,6 +10,7 @@ from langchain.schema import Document
 from langchain_community.vectorstores import Chroma
 from neuralex_main import neuralex
 from document_loader import DocumentLoader
+from qa_knowledge_base import QAKnowledgeBase
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,18 @@ class EnhancedNeuralex(neuralex):
         self.document_loader = DocumentLoader(documents_path)
         self.additional_documents_loaded = False
         self.documents_stats = {}
+        
+        # Инициализируем базу знаний QA
+        try:
+            self.qa_knowledge = QAKnowledgeBase(
+                embeddings=embeddings,
+                redis_client=self.cache.redis_client if self.cache else None,
+                persist_directory="qa_knowledge_base"
+            )
+            logger.info("✅ QA Knowledge Base инициализирована")
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации QA Knowledge Base: {e}")
+            self.qa_knowledge = None
         
         # Загружаем дополнительные документы при инициализации
         self._load_additional_documents()
@@ -160,11 +173,75 @@ class EnhancedNeuralex(neuralex):
     
     def conversational(self, query, session_id):
         """
-        Переопределенный метод с улучшенной обработкой ошибок
+        Переопределенный метод с поддержкой QA Knowledge Base
         """
+        start_time = time.time()
+        
+        # 1. Сначала ищем в базе знаний
+        if self.qa_knowledge:
+            try:
+                cached_qa = self.qa_knowledge.find_similar_qa(
+                    query, 
+                    similarity_threshold=0.85,
+                    min_rating=4.0
+                )
+                
+                if cached_qa:
+                    logger.info(f"🎯 Найден похожий вопрос в базе знаний (рейтинг: {cached_qa.rating:.1f})")
+                    
+                    # Обновляем историю чата
+                    chat_history_obj = self.get_session_history(session_id)
+                    chat_history_obj.add_user_message(query)
+                    chat_history_obj.add_ai_message(cached_qa.answer)
+                    
+                    processing_time = time.time() - start_time
+                    logger.info(f"⚡ Ответ из базы знаний за {processing_time:.2f} секунд")
+                    
+                    return cached_qa.answer, chat_history_obj.messages
+                    
+            except Exception as e:
+                logger.error(f"Ошибка при поиске в базе знаний: {e}")
+        
+        # 2. Если не найдено в базе знаний - генерируем новый ответ
         try:
-            # Вызываем родительский метод
-            return super().conversational(query, session_id)
+            logger.info("🤖 Генерируем новый ответ через RAG")
+            answer, chat_history = super().conversational(query, session_id)
+            
+            # 3. Сохраняем новую пару в базу знаний
+            if self.qa_knowledge and answer:
+                try:
+                    # Извлекаем источники из ответа (упрощенно)
+                    sources = self._extract_sources_from_answer(answer)
+                    
+                    qa_id = self.qa_knowledge.save_qa_pair(
+                        question=query,
+                        answer=answer,
+                        sources=sources,
+                        session_id=session_id,
+                        initial_rating=3.5  # Нейтральный начальный рейтинг
+                    )
+                    
+                    if qa_id:
+                        logger.info(f"💾 QA пара сохранена в базу знаний: {qa_id}")
+                        
+                        # Сохраняем ID последнего ответа для возможной оценки
+                        if self.cache and self.cache.redis_client:
+                            try:
+                                self.cache.redis_client.setex(
+                                    f"last_qa_id:{session_id}",
+                                    3600,  # TTL 1 час
+                                    qa_id
+                                )
+                            except Exception:
+                                pass
+                                
+                except Exception as e:
+                    logger.error(f"Ошибка при сохранении QA пары: {e}")
+            
+            processing_time = time.time() - start_time
+            logger.info(f"🎯 Новый ответ сгенерирован за {processing_time:.2f} секунд")
+            
+            return answer, chat_history
             
         except Exception as e:
             logger.error(f"Ошибка в conversational для session {session_id}: {e}")
@@ -193,3 +270,85 @@ class EnhancedNeuralex(neuralex):
             )
             
             return fallback_answer, []
+    
+    def _extract_sources_from_answer(self, answer: str) -> List[str]:
+        """Извлекает источники из ответа (упрощенная версия)"""
+        sources = []
+        
+        # Ищем упоминания статей и кодексов
+        import re
+        
+        # Паттерны для поиска правовых источников
+        patterns = [
+            r'[Сс]татья\s+\d+[а-я]*\s+[А-Я]{1,3}\s+РФ',  # Статья 80 ТК РФ
+            r'[А-Я]{1,3}\s+РФ',  # ТК РФ, ГК РФ и т.д.
+            r'[Фф]едеральный\s+закон[^.]*',  # Федеральный закон...
+            r'[Кк]онституция\s+РФ',  # Конституция РФ
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, answer)
+            sources.extend(matches)
+        
+        # Убираем дубликаты и ограничиваем количество
+        sources = list(set(sources))[:5]
+        
+        return sources
+    
+    def rate_last_answer(self, session_id: str, rating: int) -> bool:
+        """
+        Оценивает последний ответ пользователя
+        
+        Args:
+            session_id: ID сессии пользователя
+            rating: Оценка от 1 до 5
+            
+        Returns:
+            True если оценка сохранена успешно
+        """
+        if not self.qa_knowledge or not self.cache or not self.cache.redis_client:
+            return False
+        
+        try:
+            # Получаем ID последнего ответа
+            qa_id = self.cache.redis_client.get(f"last_qa_id:{session_id}")
+            if not qa_id:
+                logger.warning(f"Не найден ID последнего ответа для session {session_id}")
+                return False
+            
+            # Обновляем рейтинг
+            success = self.qa_knowledge.update_rating(qa_id, rating)
+            
+            if success:
+                logger.info(f"✅ Рейтинг {rating} сохранен для QA {qa_id}")
+                
+                # Удаляем ID после оценки
+                self.cache.redis_client.delete(f"last_qa_id:{session_id}")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Ошибка при оценке ответа: {e}")
+            return False
+    
+    def get_qa_stats(self) -> dict:
+        """Возвращает статистику базы знаний"""
+        if not self.qa_knowledge:
+            return {}
+        
+        try:
+            return self.qa_knowledge.get_stats()
+        except Exception as e:
+            logger.error(f"Ошибка при получении статистики QA: {e}")
+            return {}
+    
+    def get_popular_questions(self, limit: int = 10) -> List:
+        """Возвращает популярные вопросы"""
+        if not self.qa_knowledge:
+            return []
+        
+        try:
+            return self.qa_knowledge.get_popular_questions(limit)
+        except Exception as e:
+            logger.error(f"Ошибка при получении популярных вопросов: {e}")
+            return []

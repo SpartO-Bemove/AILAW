@@ -13,7 +13,7 @@ neuralex_path = os.path.join(os.path.dirname(__file__), '..', 'neuralex-main')
 if neuralex_path not in sys.path:
     sys.path.append(neuralex_path)
 
-from telegram import Update
+from enhanced_neuralex import EnhancedNeuralex
 from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -59,8 +59,8 @@ def initialize_components():
         state_manager = StateManager(redis_client)
         print("✅ StateManager инициализирован")
         
-        # Инициализация уведомлений администратора (будет инициализирован позже с bot instance)
-        
+        # Создаем enhanced neuralex с поддержкой QA Knowledge Base
+        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, REDIS_URL)
         # Инициализация аналитики и менеджера пользователей
         analytics = BotAnalytics(redis_client)
         user_manager = UserManager(redis_client)
