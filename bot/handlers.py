@@ -16,6 +16,28 @@ if neuralex_path not in sys.path:
 
 # Импортируем enhanced версию вместо базовой
 from enhanced_neuralex import EnhancedNeuralex
+# Импортируем neuralex компоненты
+import sys
+import os
+neuralex_path = os.path.join(os.path.dirname(__file__), '..', 'neuralex-main')
+if neuralex_path not in sys.path:
+    sys.path.append(neuralex_path)
+
+try:
+    from enhanced_neuralex import EnhancedNeuralex
+    ENHANCED_NEURALEX_AVAILABLE = True
+    logger.info("✅ EnhancedNeuralex импортирован успешно")
+except ImportError as e:
+    logger.error(f"❌ Ошибка импорта EnhancedNeuralex: {e}")
+    try:
+        from neuralex_main import neuralex
+        ENHANCED_NEURALEX_AVAILABLE = False
+        logger.info("✅ Базовый neuralex импортирован как fallback")
+    except ImportError as e2:
+        logger.error(f"❌ Критическая ошибка: не удалось импортировать neuralex: {e2}")
+        neuralex = None
+        ENHANCED_NEURALEX_AVAILABLE = False
+
 from telegram import Document, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -49,19 +71,6 @@ def initialize_components():
     try:
         print("🔄 Инициализация компонентов бота...")
         
-        from dotenv import load_dotenv
-        load_dotenv()
-        
-        # Инициализация Redis менеджера
-        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-        print(f"🔴 Подключение к Redis: {redis_url}")
-        redis_manager = RedisManager(redis_url)
-        redis_client = redis_manager.client
-        
-        # Инициализация менеджера состояний
-        state_manager = StateManager(redis_client)
-        print("✅ StateManager инициализирован")
-        
         # Создаем enhanced neuralex с поддержкой QA Knowledge Base
         law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, REDIS_URL)
         # Инициализация аналитики и менеджера пользователей
@@ -71,28 +80,43 @@ def initialize_components():
         
         # Инициализация админ-обработчиков
         admin_handlers = AdminHandlers(redis_client)
-        print("✅ AdminHandlers инициализированы")
+        # Проверяем доступность OpenAI API
+        openai_available = check_openai_availability()
         
-        # Инициализация neuralex компонентов
-        openai_api_key = os.getenv('OPENAI_API_KEY')
-        if not openai_api_key:
-            raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
-        
-        print("🧠 Инициализация ИИ компонентов...")
-        from enhanced_neuralex import EnhancedNeuralex
-        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        from langchain_community.vectorstores import Chroma
+        if openai_available:
+            # Инициализируем LangChain компоненты
+            from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+            from langchain_community.vectorstores import Chroma
+            
+            llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=OPENAI_API_KEY)
+            embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+            
+            # Проверяем векторную базу
+            if os.path.exists(CHROMA_DB_PATH):
+                vector_store = Chroma(persist_directory=CHROMA_DB_PATH, embedding_function=embeddings)
+                logger.info("✅ Векторная база данных загружена")
+            else:
+                logger.warning("⚠️ Векторная база данных не найдена")
+                vector_store = None
+            
+            # Создаем law_assistant
+            if ENHANCED_NEURALEX_AVAILABLE and vector_store:
+                law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, REDIS_URL)
+                logger.info("✅ EnhancedNeuralex инициализирован")
+            elif neuralex and vector_store:
+                law_assistant = neuralex(llm, embeddings, vector_store, REDIS_URL)
+                logger.info("✅ Базовый neuralex инициализирован")
+            else:
+                logger.error("❌ Не удалось инициализировать law_assistant")
+                law_assistant = None
         import fitz  # PyMuPDF для работы с PDF
         import docx  # python-docx для работы с Word
         
         llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
         print("✅ LLM инициализирован")
         
-        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        print("✅ Embeddings инициализированы")
-        
-        vector_store = Chroma(persist_directory="chroma_db_legal_bot_part1", embedding_function=embeddings)
-        print("✅ Vector store инициализирован")
+            logger.error("❌ OpenAI API недоступен, law_assistant не будет работать")
+            law_assistant = None
         
         # Создаем экземпляр enhanced neuralex с поддержкой дополнительных документов
         law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
@@ -110,7 +134,11 @@ def initialize_components():
             print("📝 Дополнительные документы не найдены (используется базовая база)")
         law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
         logger.info("Все компоненты успешно инициализированы")
-        print("🎉 Все компоненты успешно инициализированы!")
+        if law_assistant:
+            logger.info("✅ Все компоненты инициализированы успешно")
+        else:
+            logger.warning("⚠️ Компоненты инициализированы частично (без ИИ)")
+            
         return True
         
     except Exception as e:
@@ -118,6 +146,36 @@ def initialize_components():
         print(f"❌ Критическая ошибка инициализации: {e}")
         import traceback
         traceback.print_exc()
+        return False
+
+def check_openai_availability() -> bool:
+    """Проверяет доступность OpenAI API"""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Простой тест API
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=1
+        )
+        
+        logger.info("✅ OpenAI API доступен")
+        return True
+        
+    except Exception as e:
+        error_str = str(e).lower()
+        if 'unsupported_country_region_territory' in error_str:
+            logger.error("❌ OpenAI API недоступен в вашем регионе")
+            logger.info("💡 Рекомендация: используйте VPN или другой API ключ")
+        elif 'api key' in error_str:
+            logger.error("❌ Неверный API ключ OpenAI")
+        elif 'quota' in error_str:
+            logger.error("❌ Превышена квота OpenAI API")
+        else:
+            logger.error(f"❌ Ошибка OpenAI API: {e}")
+        
         return False
 
 # Инициализируем компоненты при импорте модуля
@@ -249,6 +307,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analytics.log_user_action(user_id, 'start', {'user_name': user_name})
     if user_manager:
         user_manager.update_last_activity(user_id)
+    
+    # Добавляем предупреждение если ИИ недоступен
+    if law_assistant is None:
+        welcome_message += "\n⚠️ **Внимание:** ИИ-консультант временно недоступен. Некоторые функции могут быть ограничены."
     
     logging.info(f"Пользователь {user_name} (ID: {user_id}) запустил бота")
     
@@ -689,6 +751,20 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Проверяем состояние пользователя
     if current_state == 'asking_question':
         # Обрабатываем вопрос
+    # Проверяем доступность ИИ
+    if law_assistant is None:
+        await update.message.reply_text(
+            "⚠️ **ИИ-консультант временно недоступен**\n\n"
+            "Возможные причины:\n"
+            "• Проблемы с OpenAI API\n"
+            "• Ограничения по региону\n"
+            "• Технические работы\n\n"
+            "Попробуйте позже или обратитесь к администратору.",
+            parse_mode='Markdown',
+            reply_markup=main_menu()
+        )
+        return
+    
         await process_legal_question(update, context, user_text, user_id)
     elif current_state == 'checking_document':
         await update.message.reply_text(
