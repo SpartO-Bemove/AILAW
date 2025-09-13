@@ -276,21 +276,29 @@ class QAKnowledgeBase:
             
             # Обновляем метаданные в векторной базе
             if self.vector_store:
-                metadata = {
-                    'qa_id': qa_entry.id,
-                    'qa_data': json.dumps(qa_entry.to_dict(), ensure_ascii=False),
-                    'tags': ','.join(qa_entry.tags),
-                    'rating': qa_entry.rating,
-                    'created_at': qa_entry.created_at
-                }
-                
-                # Удаляем старую запись и добавляем новую
-                self.vector_store.delete(ids=[qa_entry.id])
-                self.vector_store.add_texts(
-                    texts=[qa_entry.question],
-                    metadatas=[metadata],
-                    ids=[qa_entry.id]
-                )
+                try:
+                    metadata = {
+                        'qa_id': qa_entry.id,
+                        'qa_data': json.dumps(qa_entry.to_dict(), ensure_ascii=False),
+                        'tags': ','.join(qa_entry.tags),
+                        'rating': qa_entry.rating,
+                        'created_at': qa_entry.created_at
+                    }
+                    
+                    # Для Chroma проще пересоздать запись
+                    # Удаляем старую и добавляем новую
+                    try:
+                        self.vector_store.delete(ids=[qa_entry.id])
+                    except Exception:
+                        pass  # Игнорируем если запись не найдена
+                    
+                    self.vector_store.add_texts(
+                        texts=[qa_entry.question],
+                        metadatas=[metadata],
+                        ids=[qa_entry.id]
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка обновления в векторной базе: {e}")
             
         except Exception as e:
             logger.error(f"Ошибка при обновлении QA записи: {e}")

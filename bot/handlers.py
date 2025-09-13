@@ -1099,6 +1099,55 @@ async def export_user_history(query, user_id: str):
             reply_markup=back_to_main_button()
         )
 
+async def handle_rating(query, data):
+    """Обрабатывает оценку ответа пользователем"""
+    try:
+        rating = int(data.split('_')[1])
+        user_id = str(query.from_user.id)
+        
+        # Сохраняем оценку через law_assistant
+        if law_assistant and hasattr(law_assistant, 'rate_last_answer'):
+            success = law_assistant.rate_last_answer(user_id, rating)
+            
+            if success:
+                # Логируем оценку в аналитику
+                if analytics:
+                    # Получаем последний ответ для логирования
+                    if state_manager:
+                        last_answer_data = state_manager.get_last_answer(user_id)
+                        if last_answer_data:
+                            analytics.log_question_rating(
+                                user_id, 
+                                last_answer_data.get('question', ''), 
+                                rating
+                            )
+                
+                await query.edit_message_text(
+                    f"✅ **СПАСИБО ЗА ОЦЕНКУ!**\n\nВаша оценка: {'⭐' * rating}\n\nЭто поможет нам улучшить качество ответов.",
+                    parse_mode='Markdown',
+                    reply_markup=back_to_main_button()
+                )
+            else:
+                await query.edit_message_text(
+                    "⚠️ **НЕ УДАЛОСЬ СОХРАНИТЬ ОЦЕНКУ**\n\nВозможно, время для оценки истекло.",
+                    parse_mode='Markdown',
+                    reply_markup=back_to_main_button()
+                )
+        else:
+            await query.edit_message_text(
+                "⚠️ **СИСТЕМА ОЦЕНОК НЕДОСТУПНА**\n\nСпасибо за желание помочь!",
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+            
+    except Exception as e:
+        logger.error(f"Ошибка при обработке оценки: {e}")
+        await query.edit_message_text(
+            "❌ **ОШИБКА ПРИ СОХРАНЕНИИ ОЦЕНКИ**\n\nПопробуйте позже.",
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
+
 async def show_documents_status(query, user_id: str):
     """Показывает статус загруженных документов"""
     if law_assistant:
@@ -1139,7 +1188,12 @@ async def show_documents_status(query, user_id: str):
             status_text += "\n\n✅ **Базовая векторная база:** Доступна"
         else:
             status_text += "\n\n❌ **Базовая векторная база:** Недоступна"
-        await handle_rating(query, data)
+        
+        await query.edit_message_text(
+            status_text,
+            parse_mode='Markdown',
+            reply_markup=back_to_main_button()
+        )
     else:
         await query.edit_message_text(
             "❌ Информация о документах недоступна",
