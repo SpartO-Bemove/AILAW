@@ -84,6 +84,7 @@ class DocumentLoader:
                 
                 try:
                     import fitz  # Импортируем здесь для использования
+                    import fitz  # Локальный импорт
                     doc = fitz.open(file_path)
                     text = ""
                     for page in doc:
@@ -100,6 +101,7 @@ class DocumentLoader:
                     return None
                 
                 try:
+                    import docx  # Локальный импорт
                     import docx  # Импортируем здесь для использования
                     doc = docx.Document(file_path)
                     text = ""

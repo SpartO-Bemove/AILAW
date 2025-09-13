@@ -5,7 +5,7 @@ import logging
 import json
 import tempfile
 import asyncio
-from .config import TOKEN, OPENAI_API_KEY, CHROMA_DB_PATH, MAX_FILE_SIZE, ALLOWED_EXTENSIONS, REDIS_URL
+from .config import TOKEN, OPENAI_API_KEY, CHROMA_DB_PATH, MAX_FILE_SIZE, ALLOWED_EXTENSIONS, REDIS_URL, ADMIN_CHAT_ID
 import docx  # python-docx
 from datetime import datetime
 
@@ -66,86 +66,84 @@ admin_handlers = None
 
 def initialize_components():
     """Инициализирует все компоненты системы"""
-    global law_assistant, analytics, user_manager, redis_manager, state_manager, admin_notifier, admin_handlers
+    global law_assistant, analytics, user_manager, state_manager, admin_handlers, admin_notifier
     
     try:
-        print("🔄 Инициализация компонентов бота...")
+        logger.info("🔄 Инициализация компонентов...")
         
-        # Создаем enhanced neuralex с поддержкой QA Knowledge Base
-        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, REDIS_URL)
-        # Инициализация аналитики и менеджера пользователей
-        analytics = BotAnalytics(redis_client)
-        user_manager = UserManager(redis_client)
-        print("✅ Analytics и UserManager инициализированы")
-        
-        # Инициализация админ-обработчиков
-        admin_handlers = AdminHandlers(redis_client)
         # Проверяем доступность OpenAI API
-        openai_available = check_openai_availability()
+        if not check_openai_availability():
+            logger.warning("⚠️ OpenAI API недоступен, бот работает в ограниченном режиме")
+            law_assistant, analytics, user_manager, state_manager, admin_handlers, admin_notifier = None, None, None, None, None, None
+            return False
         
-        if openai_available:
-            # Инициализируем LangChain компоненты
-            from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-            from langchain_community.vectorstores import Chroma
-            
-            llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=OPENAI_API_KEY)
-            embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-            
-            # Проверяем векторную базу
-            if os.path.exists(CHROMA_DB_PATH):
-                vector_store = Chroma(persist_directory=CHROMA_DB_PATH, embedding_function=embeddings)
-                logger.info("✅ Векторная база данных загружена")
-            else:
-                logger.warning("⚠️ Векторная база данных не найдена")
-                vector_store = None
-            
-            # Создаем law_assistant
-            if ENHANCED_NEURALEX_AVAILABLE and vector_store:
-                law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, REDIS_URL)
-                logger.info("✅ EnhancedNeuralex инициализирован")
-            elif neuralex and vector_store:
-                law_assistant = neuralex(llm, embeddings, vector_store, REDIS_URL)
-                logger.info("✅ Базовый neuralex инициализирован")
-            else:
-                logger.error("❌ Не удалось инициализировать law_assistant")
-                law_assistant = None
-        import fitz  # PyMuPDF для работы с PDF
-        import docx  # python-docx для работы с Word
+        # Получаем переменные из конфигурации
+        openai_api_key = OPENAI_API_KEY
+        redis_url = REDIS_URL
+        
+        # Инициализируем Redis
+        redis_client = None
+        if redis_url:
+            try:
+                import redis
+                redis_client = redis.from_url(redis_url)
+                redis_client.ping()  # Проверяем соединение
+                logger.info("✅ Redis подключен")
+            except Exception as e:
+                logger.error(f"Ошибка подключения к Redis: {e}")
+                redis_client = None
+        
+        # Инициализируем компоненты LangChain
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from langchain_community.vectorstores import Chroma
         
         llm = ChatOpenAI(model='gpt-4o-mini', temperature=0.9, openai_api_key=openai_api_key)
-        print("✅ LLM инициализирован")
+        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
         
-            logger.error("❌ OpenAI API недоступен, law_assistant не будет работать")
+        # Проверяем векторную базу
+        if os.path.exists(CHROMA_DB_PATH):
+            vector_store = Chroma(persist_directory=CHROMA_DB_PATH, embedding_function=embeddings)
+            logger.info("✅ Векторная база данных загружена")
+        else:
+            logger.warning("⚠️ Векторная база данных не найдена")
+            vector_store = None
+        
+        # Создаем law_assistant
+        if ENHANCED_NEURALEX_AVAILABLE and vector_store:
+            law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
+            logger.info("✅ EnhancedNeuralex инициализирован")
+        elif neuralex and vector_store:
+            law_assistant = neuralex(llm, embeddings, vector_store, redis_url)
+            logger.info("✅ Базовый neuralex инициализирован")
+        else:
+            logger.error("❌ Не удалось инициализировать law_assistant")
             law_assistant = None
         
-        # Создаем экземпляр enhanced neuralex с поддержкой дополнительных документов
-        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
-        print("✅ Enhanced Neuralex инициализирован")
+        # Инициализируем остальные компоненты
+        if redis_client:
+            analytics = BotAnalytics(redis_client)
+            user_manager = UserManager(redis_client)
+            state_manager = StateManager(redis_client)
+            admin_handlers = AdminHandlers(redis_client)
+            logger.info("✅ Компоненты с Redis инициализированы")
         
-        # Выводим информацию о загруженных документах
-        docs_info = law_assistant.get_documents_info()
-        if docs_info['additional_documents_loaded']:
-            stats = docs_info['stats']
-            print(f"📚 Дополнительные документы: {stats['total_files']} файлов")
-            for category, count in stats['categories'].items():
-                if count > 0:
-                    print(f"   • {category}: {count} файлов")
-        else:
-            print("📝 Дополнительные документы не найдены (используется базовая база)")
-        law_assistant = EnhancedNeuralex(llm, embeddings, vector_store, redis_url, "documents")
-        logger.info("Все компоненты успешно инициализированы")
-        if law_assistant:
-            logger.info("✅ Все компоненты инициализированы успешно")
-        else:
-            logger.warning("⚠️ Компоненты инициализированы частично (без ИИ)")
-            
+        # Инициализируем admin notifier
+        try:
+            from telegram import Bot
+            from .admin_notifier import AdminNotifier
+            bot = Bot(token=TOKEN)
+            admin_notifier = AdminNotifier(bot)
+            logger.info("✅ Admin notifier инициализирован")
+        except Exception as e:
+            logger.error(f"Ошибка инициализации admin notifier: {e}")
+            admin_notifier = None
+        
+        logger.info("✅ Все компоненты успешно инициализированы")
         return True
         
     except Exception as e:
-        logger.error(f"Критическая ошибка инициализации: {e}")
-        print(f"❌ Критическая ошибка инициализации: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Критическая ошибка инициализации: {e}")
+        law_assistant, analytics, user_manager, state_manager, admin_handlers, admin_notifier = None, None, None, None, None, None
         return False
 
 def check_openai_availability() -> bool:
