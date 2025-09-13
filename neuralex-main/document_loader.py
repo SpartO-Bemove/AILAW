@@ -83,6 +83,7 @@ class DocumentLoader:
                     return None
                 
                 try:
+                    import fitz  # Импортируем здесь для использования
                     doc = fitz.open(file_path)
                     text = ""
                     for page in doc:
@@ -99,6 +100,7 @@ class DocumentLoader:
                     return None
                 
                 try:
+                    import docx  # Импортируем здесь для использования
                     doc = docx.Document(file_path)
                     text = ""
                     for paragraph in doc.paragraphs:
