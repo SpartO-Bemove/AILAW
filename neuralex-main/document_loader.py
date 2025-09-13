@@ -13,19 +13,23 @@ try:
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
-    logger.warning("PyMuPDF не установлен, PDF файлы не будут обрабатываться")
 
 try:
     import docx
     PYTHON_DOCX_AVAILABLE = True
 except ImportError:
     PYTHON_DOCX_AVAILABLE = False
-    logger.warning("python-docx не установлен, DOCX файлы не будут обрабатываться")
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
 logger = logging.getLogger(__name__)
+
+# Логируем доступность библиотек после инициализации logger
+if not PYMUPDF_AVAILABLE:
+    logger.warning("PyMuPDF не установлен, PDF файлы не будут обрабатываться")
+if not PYTHON_DOCX_AVAILABLE:
+    logger.warning("python-docx не установлен, DOCX файлы не будут обрабатываться")
 
 class DocumentLoader:
     """Класс для загрузки документов из папки documents/"""
