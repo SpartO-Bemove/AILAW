@@ -4,32 +4,14 @@
 import logging
 import os
 import hashlib
+import fitz  # PyMuPDF - импортируем в начале
+import docx  # python-docx - импортируем в начале
 from typing import List, Dict, Optional
 from pathlib import Path
-
-# Импорты для обработки документов
-try:
-    import fitz  # PyMuPDF
-    PYMUPDF_AVAILABLE = True
-except ImportError:
-    PYMUPDF_AVAILABLE = False
-
-try:
-    import docx
-    PYTHON_DOCX_AVAILABLE = True
-except ImportError:
-    PYTHON_DOCX_AVAILABLE = False
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
-logger = logging.getLogger(__name__)
-
-# Логируем доступность библиотек после инициализации logger
-if not PYMUPDF_AVAILABLE:
-    logger.warning("PyMuPDF не установлен, PDF файлы не будут обрабатываться")
-if not PYTHON_DOCX_AVAILABLE:
-    logger.warning("python-docx не установлен, DOCX файлы не будут обрабатываться")
 
 class DocumentLoader:
     """Класс для загрузки документов из папки documents/"""
@@ -37,12 +19,8 @@ class DocumentLoader:
     def __init__(self, documents_path: str = "documents"):
         self.documents_path = Path(documents_path)
         
-        # Определяем поддерживаемые форматы на основе доступных библиотек
-        self.supported_extensions = {'.txt', '.md'}
-        if PYMUPDF_AVAILABLE:
-            self.supported_extensions.add('.pdf')
-        if PYTHON_DOCX_AVAILABLE:
-            self.supported_extensions.add('.docx')
+        # Поддерживаемые форматы
+        self.supported_extensions = {'.txt', '.md', '.pdf', '.docx'}
             
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -65,7 +43,7 @@ class DocumentLoader:
             with open(file_path, 'rb') as f:
                 return hashlib.md5(f.read()).hexdigest()
         except Exception as e:
-            logger.error(f"Ошибка при получении хэша файла {file_path}: {e}")
+            logging.getLogger(__name__).error(f"Ошибка при получении хэша файла {file_path}: {e}")
             return ""
     
     def extract_text_from_file(self, file_path: Path) -> Optional[str]:
@@ -78,13 +56,7 @@ class DocumentLoader:
                     return f.read()
             
             elif extension == '.pdf':
-                if not PYMUPDF_AVAILABLE:
-                    logger.warning(f"PyMuPDF не доступен, пропускаем PDF файл: {file_path}")
-                    return None
-                
                 try:
-                    import fitz  # Импортируем здесь для использования
-                    import fitz  # Локальный импорт
                     doc = fitz.open(file_path)
                     text = ""
                     for page in doc:
@@ -92,32 +64,26 @@ class DocumentLoader:
                     doc.close()
                     return text
                 except Exception as e:
-                    logger.error(f"Ошибка при чтении PDF {file_path}: {e}")
+                    logging.getLogger(__name__).error(f"Ошибка при чтении PDF {file_path}: {e}")
                     return None
             
             elif extension == '.docx':
-                if not PYTHON_DOCX_AVAILABLE:
-                    logger.warning(f"python-docx не доступен, пропускаем DOCX файл: {file_path}")
-                    return None
-                
                 try:
-                    import docx  # Локальный импорт
-                    import docx  # Импортируем здесь для использования
                     doc = docx.Document(file_path)
                     text = ""
                     for paragraph in doc.paragraphs:
                         text += paragraph.text + "\n"
                     return text
                 except Exception as e:
-                    logger.error(f"Ошибка при чтении DOCX {file_path}: {e}")
+                    logging.getLogger(__name__).error(f"Ошибка при чтении DOCX {file_path}: {e}")
                     return None
             
             else:
-                logger.warning(f"Неподдерживаемый формат файла: {extension}")
+                logging.getLogger(__name__).warning(f"Неподдерживаемый формат файла: {extension}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Ошибка при извлечении текста из {file_path}: {e}")
+            logging.getLogger(__name__).error(f"Ошибка при извлечении текста из {file_path}: {e}")
             return None
     
     def load_documents_from_directory(self, directory: Path, category: str) -> List[Document]:
@@ -125,7 +91,7 @@ class DocumentLoader:
         documents = []
         
         if not directory.exists():
-            logger.info(f"Директория {directory} не существует")
+            logging.getLogger(__name__).info(f"Директория {directory} не существует")
             return documents
         
         for file_path in directory.iterdir():
@@ -133,7 +99,7 @@ class DocumentLoader:
                 try:
                     # Проверяем размер файла (максимум 10 МБ)
                     if file_path.stat().st_size > 10 * 1024 * 1024:
-                        logger.warning(f"Файл {file_path.name} слишком большой (>10MB), пропускаем")
+                        logging.getLogger(__name__).warning(f"Файл {file_path.name} слишком большой (>10MB), пропускаем")
                         continue
                     
                     text = self.extract_text_from_file(file_path)
@@ -154,12 +120,12 @@ class DocumentLoader:
                             )
                             documents.append(doc)
                         
-                        logger.info(f"✅ Загружен документ: {file_path.name} ({len(chunks)} фрагментов)")
+                        logging.getLogger(__name__).info(f"✅ Загружен документ: {file_path.name} ({len(chunks)} фрагментов)")
                     else:
-                        logger.warning(f"Файл {file_path.name} пустой или слишком короткий")
+                        logging.getLogger(__name__).warning(f"Файл {file_path.name} пустой или слишком короткий")
                         
                 except Exception as e:
-                    logger.error(f"Ошибка при обработке файла {file_path}: {e}")
+                    logging.getLogger(__name__).error(f"Ошибка при обработке файла {file_path}: {e}")
         
         return documents
     
@@ -180,9 +146,9 @@ class DocumentLoader:
             all_documents.extend(documents)
             
             if documents:
-                logger.info(f"📚 Категория '{category}': загружено {len(documents)} фрагментов")
+                logging.getLogger(__name__).info(f"📚 Категория '{category}': загружено {len(documents)} фрагментов")
         
-        logger.info(f"📊 Всего загружено документов: {len(all_documents)} фрагментов")
+        logging.getLogger(__name__).info(f"📊 Всего загружено документов: {len(all_documents)} фрагментов")
         return all_documents
     
     def get_documents_stats(self) -> Dict:
