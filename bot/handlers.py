@@ -4,6 +4,8 @@ import logging
 import json
 import tempfile
 import asyncio
+import fitz  # PyMuPDF
+import docx  # python-docx
 from datetime import datetime
 
 # Добавляем путь к neuralex-main
@@ -121,30 +123,73 @@ initialize_components()
 def extract_text_from_file(file_path, file_extension):
     """Извлекает текст из различных типов файлов"""
     try:
+        logger.info(f"Извлечение текста из файла: {file_path}, расширение: {file_extension}")
+        
         if file_extension.lower() == '.pdf':
-            doc = fitz.open(file_path)
-            text = ""
-            for page in doc:
-                text += page.get_text()
-            doc.close()
-            return text
+            try:
+                doc = fitz.open(file_path)
+                text = ""
+                for page_num in range(len(doc)):
+                    page = doc.load_page(page_num)
+                    page_text = page.get_text()
+                    text += page_text + "\n"
+                doc.close()
+                logger.info(f"Извлечено {len(text)} символов из PDF")
+                return text.strip()
+            except Exception as pdf_error:
+                logger.error(f"Ошибка при обработке PDF: {pdf_error}")
+                return None
         
         elif file_extension.lower() in ['.docx', '.doc']:
-            doc = docx.Document(file_path)
-            text = ""
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
-            return text
+            try:
+                if file_extension.lower() == '.doc':
+                    logger.warning("Формат .doc может работать некорректно, рекомендуется .docx")
+                
+                doc = docx.Document(file_path)
+                text = ""
+                for paragraph in doc.paragraphs:
+                    if paragraph.text.strip():
+                        text += paragraph.text + "\n"
+                
+                # Также извлекаем текст из таблиц
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                text += cell.text + " "
+                    text += "\n"
+                
+                logger.info(f"Извлечено {len(text)} символов из DOCX")
+                return text.strip()
+            except Exception as docx_error:
+                logger.error(f"Ошибка при обработке DOCX: {docx_error}")
+                return None
         
         elif file_extension.lower() == '.txt':
-            with open(file_path, 'r', encoding='utf-8') as file:
-                return file.read()
+            try:
+                # Пробуем разные кодировки
+                encodings = ['utf-8', 'cp1251', 'latin-1']
+                for encoding in encodings:
+                    try:
+                        with open(file_path, 'r', encoding=encoding) as file:
+                            text = file.read()
+                            logger.info(f"Извлечено {len(text)} символов из TXT (кодировка: {encoding})")
+                            return text.strip()
+                    except UnicodeDecodeError:
+                        continue
+                
+                logger.error("Не удалось определить кодировку текстового файла")
+                return None
+            except Exception as txt_error:
+                logger.error(f"Ошибка при обработке TXT: {txt_error}")
+                return None
         
         else:
-            logging.warning(f"Неподдерживаемый формат файла: {file_extension}")
+            logger.warning(f"Неподдерживаемый формат файла: {file_extension}")
             return None
+            
     except Exception as e:
-        logging.error(f"Ошибка при извлечении текста: {e}")
+        logger.error(f"Общая ошибка при извлечении текста: {e}")
         return None
 
 async def analyze_document(document_text, user_id):
@@ -539,19 +584,44 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Извлекаем текст из файла
         document_text = extract_text_from_file(temp_file_path, file_extension)
         
+        logger.info(f"Результат извлечения текста: {len(document_text) if document_text else 0} символов")
+        
         # Удаляем временный файл
         os.unlink(temp_file_path)
         
-        if not document_text or len(document_text.strip()) < 50:
+        if not document_text:
             await update.message.reply_text(
-                "❌ Не удалось извлечь текст из документа или документ слишком короткий.",
+                "❌ **Не удалось извлечь текст из документа**\n\n"
+                "Возможные причины:\n"
+                "• Документ поврежден или зашифрован\n"
+                "• Неподдерживаемая кодировка (для TXT)\n"
+                "• Документ содержит только изображения\n"
+                "• Формат .doc (попробуйте .docx)\n\n"
+                "💡 **Рекомендации:**\n"
+                "• Проверьте, что файл открывается на компьютере\n"
+                "• Для PDF убедитесь, что текст можно выделить\n"
+                "• Попробуйте сохранить в другом формате",
+                parse_mode='Markdown',
                 reply_markup=back_to_main_button()
             )
             if state_manager:
                 state_manager.clear_user_state(user_id)
             return
         
-        logging.info(f"Анализ документа для пользователя {user_id}: {document.file_name}")
+        if len(document_text.strip()) < 50:
+            await update.message.reply_text(
+                f"❌ **Документ слишком короткий для анализа**\n\n"
+                f"Извлечено символов: {len(document_text.strip())}\n"
+                f"Минимум требуется: 50 символов\n\n"
+                f"Возможно, документ содержит в основном изображения или таблицы без текста.",
+                parse_mode='Markdown',
+                reply_markup=back_to_main_button()
+            )
+            if state_manager:
+                state_manager.clear_user_state(user_id)
+            return
+        
+        logger.info(f"Анализ документа для пользователя {user_id}: {document.file_name}, символов: {len(document_text)}")
         
         # Анализируем документ
         analysis_result = await analyze_document(document_text, user_id)
